@@ -14,28 +14,35 @@ pub async fn start_evdev_collector(
         let path = device_path.clone().or_else(detect_keyboard_device);
 
         if let Some(path) = path {
-            if let Ok(device) = Device::open(&path) {
-                if let Ok(mut event_stream) = device.into_event_stream() {
-                    println!("Listening on device: {}", event_stream.device().name().unwrap_or("Unknown"));
+            match Device::open(&path) {
+                Ok(device) => {
+                    if let Ok(mut event_stream) = device.into_event_stream() {
+                        println!("Listening on device: {}", event_stream.device().name().unwrap_or("Unknown"));
 
-                    loop {
-                        match event_stream.next_event().await {
-                            Ok(event) => {
-                                if event.event_type() == evdev::EventType::KEY && event.value() == 1 {
-                                    if let Some(key) = event_code_to_char(event.code()) {
-                                        let mut engine_lock = engine.write().await;
-                                        engine_lock.handle_key(key).await;
+                        loop {
+                            match event_stream.next_event().await {
+                                Ok(event) => {
+                                    if event.event_type() == evdev::EventType::KEY && event.value() == 1 {
+                                        if let Some(key) = event_code_to_char(event.code()) {
+                                            let mut engine_lock = engine.write().await;
+                                            engine_lock.handle_key(key).await;
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                eprintln!("Device error: {}. Attempting re-scan...", e);
-                                break;
+                                Err(e) => {
+                                    eprintln!("Device error: {}. Attempting re-scan...", e);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+                Err(e) => {
+                    eprintln!("Failed to open device {}: {}", path, e);
+                }
             }
+        } else {
+            eprintln!("No keyboard device detected. Retrying in 5 seconds...");
         }
 
         tokio::time::sleep(Duration::from_secs(5)).await;

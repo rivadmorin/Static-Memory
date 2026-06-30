@@ -20,13 +20,13 @@ impl OSInterface for LinuxOS {
             let display = (xlib.XOpenDisplay)(ptr::null());
             if display.is_null() { return None; }
 
-            let mut root_return = 0;
-            let mut child_return = 0;
-            let mut root_x_return = 0;
-            let mut root_y_return = 0;
-            let mut win_x_return = 0;
-            let mut win_y_return = 0;
-            let mut mask_return = 0;
+            let _root_return = 0;
+            let _child_return = 0;
+            let _root_x_return = 0;
+            let _root_y_return = 0;
+            let _win_x_return = 0;
+            let _win_y_return = 0;
+            let _mask_return = 0;
 
             let root = (xlib.XDefaultRootWindow)(display);
             let active_window_atom = (xlib.XInternAtom)(display, "_NET_ACTIVE_WINDOW\0".as_ptr() as *const i8, xlib::False);
@@ -61,8 +61,8 @@ impl OSInterface for LinuxOS {
                     (xlib.XFree)(title_prop as *mut _);
                     (xlib.XCloseDisplay)(display);
                     return Some(WindowInfo {
-                        process_name: "LinuxApp".to_string(), // Full proc name lookup would be here
-                        title,
+                        process_name: "LinuxApp".into(), // Full proc name lookup would be here
+                        title: title.into(),
                     });
                 }
             }
@@ -70,8 +70,8 @@ impl OSInterface for LinuxOS {
             (xlib.XCloseDisplay)(display);
 
             Some(WindowInfo {
-                process_name: "LinuxApp".to_string(),
-                title: "Linux Window".to_string(),
+                process_name: "LinuxApp".into(),
+                title: "Linux Window".into(),
             })
         }
     }
@@ -92,7 +92,7 @@ pub fn detect_keyboard_device() -> Option<String> {
 
     for path in paths.flatten() {
         let path_str = path.path();
-        if let Ok(mut device) = Device::open(&path_str) {
+        if let Ok(device) = Device::open(&path_str) {
             // Check if it's a keyboard by looking at supported keys
             // KeyMask for essential keys (e.g., KEY_A, KEY_Z)
             if device.supported_keys().map_or(false, |keys| keys.contains(evdev::KeyCode::KEY_A)) {

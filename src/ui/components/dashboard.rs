@@ -94,7 +94,8 @@ impl Component<crate::ui::app::Msg, crate::ui::app::Event> for DashboardComponen
         match ev {
             Event::Keyboard(key_event) => match key_event.code {
                 tuirealm::event::Key::Char('q') => Some(crate::ui::app::Msg::AppClose),
-                tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(crate::ui::app::Id::Timeline)),
+                tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
+                tuirealm::event::Key::Char('e') if key_event.modifiers.contains(tuirealm::event::KeyModifiers::CONTROL) => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::ExportModal)),
                 _ => None,
             },
             _ => None,

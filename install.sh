@@ -124,7 +124,7 @@ info "Memastikan $BIN_DIR ada di PATH..."
 add_to_path() {
     local shell_file=$1
     if [ -f "$shell_file" ]; then
-        if ! grep -q "$BIN_DIR" "$shell_file"; then
+        if ! grep -q "static-memory" "$shell_file"; then
             echo -e "\n# Static-Memory path\nexport PATH=\"\$PATH:$BIN_DIR\"" >> "$shell_file"
             info "Menambahkan $BIN_DIR ke $shell_file"
         else

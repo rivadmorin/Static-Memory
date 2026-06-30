@@ -2,23 +2,16 @@ use tuirealm::{
     terminal::TerminalBridge,
     Application,
     Update,
+    AttrValue, Attribute, props::{PropPayload, PropValue},
 };
 use ratatui::layout::{Layout, Constraint, Direction};
+use crate::ui::Id;
 
-// This is a minimal boilerplate for a tui-realm app
 pub struct Model {
     pub app: Application<Id, Msg, Event>,
     pub quit: bool,
     pub terminal: TerminalBridge,
     pub active_tab: Id,
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum Id {
-    Timeline,
-    Detail,
-    Dashboard,
-    StatusBar,
 }
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +20,8 @@ pub enum Msg {
     AppClose,
     SwitchTab(Id),
     UpdateAnalytics(crate::storage::AnalyticsData),
+    UpdateTimeline(Vec<crate::models::LogEntry>),
+    ExportExecuted(String),
     SetIdle(bool),
 }
 
@@ -69,11 +64,19 @@ impl Update<Msg> for Model {
                 None
             }
             Some(Msg::UpdateAnalytics(data)) => {
-                let _ = self.app.attr(&Id::Dashboard, tuirealm::Attribute::Custom("data"), tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(tuirealm::props::PropValue::Str(serde_json::to_string(&data).unwrap()))));
+                if let Ok(data_str) = serde_json::to_string(&data) {
+                    let _ = self.app.attr(&Id::Dashboard, Attribute::Custom("data"), AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))));
+                }
+                None
+            }
+            Some(Msg::UpdateTimeline(data)) => {
+                if let Ok(data_str) = serde_json::to_string(&data) {
+                    let _ = self.app.attr(&Id::Timeline, Attribute::Custom("data"), AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))));
+                }
                 None
             }
             Some(Msg::SetIdle(idle)) => {
-                let _ = self.app.attr(&Id::StatusBar, tuirealm::Attribute::Custom("idle"), tuirealm::AttrValue::Flag(idle));
+                let _ = self.app.attr(&Id::StatusBar, Attribute::Custom("idle"), AttrValue::Flag(idle));
                 None
             }
             _ => None,
