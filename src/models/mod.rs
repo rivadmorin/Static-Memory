@@ -3,12 +3,33 @@ use smol_str::SmolStr;
 use chrono::{DateTime, Utc};
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub app_name: SmolStr,
     pub window_title: SmolStr,
-    pub buffer: String,
+    pub buffer: SmolStr,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum IPCMessage {
+    GetStatus,
+    GetTimeline { limit: usize },
+    GetAnalytics,
+    ExportData { start: DateTime<Utc>, end: DateTime<Utc>, format: String },
+    PurgeData,
+    Pause,
+    Resume,
+    Shutdown,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum IPCResponse {
+    Timeline(Vec<LogEntry>),
+    Analytics(crate::storage::AnalyticsData),
+    Status { is_paused: bool, is_idle: bool },
+    Ok,
+    Error(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,12 +41,6 @@ pub struct Config {
     pub linux: Option<LinuxConfig>,
 }
 
-fn default_privacy() -> Arc<RwLock<PrivacyConfig>> {
-    Arc::new(RwLock::new(PrivacyConfig {
-        exclude_processes: vec!["bitwarden.exe".into(), "keepassxc".into()],
-        exclude_titles: vec!["Incognito".to_string(), "Private Browsing".to_string()],
-    }))
-}
 
 impl Clone for Config {
     fn clone(&self) -> Self {
@@ -73,15 +88,16 @@ pub struct LinuxConfig {
 #[allow(dead_code)]
 impl Default for Config {
     fn default() -> Self {
+        let data_dir = crate::os::get_data_dir();
         Self {
             storage: StorageConfig {
-                db_path: "activity_log.db".to_string(),
+                db_path: data_dir.join("activity_log.db").to_string_lossy().to_string(),
                 rotation_size_mb: 50,
                 rotation_interval_days: 30,
                 retention_days: 7,
             },
             engine: EngineConfig {
-                idle_threshold_seconds: 180,
+                idle_threshold_seconds: 180, // 3 minutes
             },
             privacy: Arc::new(RwLock::new(PrivacyConfig {
                 exclude_processes: vec!["bitwarden.exe".into(), "keepassxc".into()],

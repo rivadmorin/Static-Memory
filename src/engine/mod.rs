@@ -92,9 +92,9 @@ impl<O: OSInterface> Engine<O> {
         if let Some(window) = &self.current_window {
             let entry = LogEntry {
                 timestamp: Utc::now(),
-                app_name: SmolStr::new(&window.process_name),
-                window_title: SmolStr::new(&window.title),
-                buffer: message,
+                app_name: window.process_name.clone(),
+                window_title: window.title.clone(),
+                buffer: SmolStr::new(message),
             };
             let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
         }
@@ -106,7 +106,8 @@ impl<O: OSInterface> Engine<O> {
         let switch = match (&self.current_window, &new_window) {
             (Some(curr), Some(new)) => curr.title != new.title || curr.process_name != new.process_name,
             (None, Some(_)) => true,
-            _ => false,
+            (Some(_), None) => false, // Keep current window if new is none
+            (None, None) => false,
         };
 
         if switch {
@@ -120,9 +121,9 @@ impl<O: OSInterface> Engine<O> {
             if let Some(window) = &self.current_window {
                 let entry = LogEntry {
                     timestamp: Utc::now(),
-                    app_name: SmolStr::new(&window.process_name),
-                    window_title: SmolStr::new(&window.title),
-                    buffer: self.buffer.get_string(),
+                    app_name: window.process_name.clone(),
+                    window_title: window.title.clone(),
+                    buffer: SmolStr::new(self.buffer.get_string()),
                 };
                 let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
             }
