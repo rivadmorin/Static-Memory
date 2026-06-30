@@ -86,14 +86,25 @@ try {
     exit 1
 }
 
-# 6. Summary Board
+# 6. PATH Idempotency
+Write-Info "Memastikan direktori aplikasi ada di PATH..."
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -split ";" -notcontains $destDir) {
+    Write-Info "Menambahkan $destDir ke PATH pengguna..."
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$destDir", "User")
+    $env:Path += ";$destDir"
+} else {
+    Write-Info "Direktori sudah terdaftar di PATH."
+}
+
+# 7. Summary Board
 Write-Host ""
 Write-Host "┌────────────────────────────────────────────────────────────────────────────────┐" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "                  ✨ Static-Memory Berhasil Terpasang! ✨                       " -NoNewline -ForegroundColor Green; Write-Host "│" -ForegroundColor Blue
 Write-Host "├────────────────────────────────────────────────────────────────────────────────┤" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host " " -NoNewline; Write-Host "🚀 Cara Menjalankan:" -NoNewline -ForegroundColor Yellow; Write-Host "                                                           " -NoNewline; Write-Host "│" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "    Aplikasi otomatis berjalan saat startup.                                     " -NoNewline; Write-Host "│" -ForegroundColor Blue
-Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "    Untuk membuka UI, jalankan: " -NoNewline; Write-Host "$destDir\static-memory.exe" -NoNewline -ForegroundColor Green; Write-Host "         " -NoNewline; Write-Host "│" -ForegroundColor Blue
+Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "    Untuk membuka UI, cukup ketik: " -NoNewline; Write-Host "static-memory" -NoNewline -ForegroundColor Green; Write-Host "                                 " -NoNewline; Write-Host "│" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "                                                                                " -NoNewline; Write-Host "│" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host " " -NoNewline; Write-Host "🕵️  Latar Belakang:" -NoNewline -ForegroundColor Yellow; Write-Host "                                                            " -NoNewline; Write-Host "│" -ForegroundColor Blue
 Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "    Tekan " -NoNewline; Write-Host "d" -NoNewline -ForegroundColor Blue; Write-Host " atau " -NoNewline; Write-Host "Ctrl+D" -NoNewline -ForegroundColor Blue; Write-Host " di dalam TUI untuk melepaskan antarmuka.             " -NoNewline; Write-Host "│" -ForegroundColor Blue
@@ -104,4 +115,4 @@ Write-Host "│" -NoNewline -ForegroundColor Blue; Write-Host "    Lokasi: " -No
 Write-Host "└────────────────────────────────────────────────────────────────────────────────┘" -ForegroundColor Blue
 Write-Host ""
 
-Write-Success "Instalasi selesai!"
+Write-Success "Instalasi selesai! Mulai ulang terminal Anda untuk menggunakan perintah 'static-memory'."

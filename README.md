@@ -1,138 +1,73 @@
 # 🧠 Static-Memory: Context-Aware Local Activity Logger
 
-**Static-Memory** adalah sistem pencatatan aktivitas lokal yang ultra-efisien, dirancang khusus untuk pengguna yang mengutamakan kedaulatan data dan privasi total. Dibangun dengan bahasa pemrograman Rust dan runtime asinkron Tokio, proyek ini mampu menangkap setiap keystroke dan metrik sistem dengan presisi tinggi, memetakannya ke konteks jendela yang aktif tanpa mengorbankan performa sistem.
+**Static-Memory** adalah sistem pencatatan aktivitas lokal yang ultra-efisien, dirancang khusus untuk pengguna yang mengutamakan kedaulatan data dan privasi total. Dibangun dengan Rust dan runtime asinkron Tokio, proyek ini menangkap setiap keystroke dan metrik sistem dengan presisi tinggi, memetakannya ke konteks jendela yang aktif tanpa mengorbankan performa sistem.
 
 ---
 
-## ⚡ Proposisi Nilai & Jaminan Privasi
+## 🏗️ System Architecture & Performance Guarantees
 
-Kami menjamin bahwa data Anda adalah milik Anda sepenuhnya. Static-Memory beroperasi dengan prinsip **Zero-Telemetry**.
+Static-Memory beroperasi menggunakan **Daemon-Client Model** untuk memastikan pemisahan tugas yang bersih antara perekaman data dan visualisasi antarmuka.
+
+*   **Background Daemon**: Berjalan sebagai layanan latar belakang yang persisten. Daemon ini menangani semua operasi input OS, filter privasi, dan manajemen database SQLite secara eksklusif untuk mengeliminasi masalah *database locking*.
+*   **Thin TUI Client**: Antarmuka berbasis terminal yang ringan (~10-15 MB footprint aktif). Client berkomunikasi dengan Daemon melalui Local IPC (Unix Domain Sockets di Linux `~/.local/share/static-memory/daemon.sock` dan Named Pipes di Windows). Saat dilepaskan (detached), proses UI mati dan konsumsi sumber daya kembali ke nol, sementara Daemon tetap merekam.
 
 | Metrik | Target Performa |
 | :--- | :--- |
-| **Penggunaan RAM** | 50 - 60 MB (Steady State) |
+| **Penggunaan RAM** | 50 - 60 MB (Steady State Daemon) |
 | **Penggunaan CPU** | < 1% (Bahkan saat aktivitas input tinggi) |
 | **Disk I/O** | Minimal (Optimasi via SQLite WAL & Batch Flushing) |
-| **Kedaulatan Data** | 100% Lokal (Tidak ada pengiriman data ke awan) |
-| **Keamanan** | Enkripsi database opsional & pembersihan otomatis |
+| **Database Mode** | PRAGMA journal_mode = WAL, PRAGMA synchronous = NORMAL |
 
 ---
 
-## 🏗️ Arsitektur Sistem (Data Flow)
+## 🚀 Fitur Unggulan (Advanced Features)
 
-Static-Memory menggunakan pipeline pemrosesan data multi-threaded yang tidak memblokir antarmuka pengguna atau latensi input OS.
-
-```text
-[ Hardware Interrupt ]
-          │
-          ▼
-[ OS Hook Loop ] ──────────────► [ Raw Event Capture ]
-          │                       (SetWindowsHookExW / evdev)
-          ▼
-[ SmallVec Stack Buffer ] ─────► [ Logika Koreksi Input ]
-          │                       (Backspace/Delete Handling)
-          ▼
-[ Bounded Tokio MPSC ] ────────► [ Context Engine ]
-          │                       (Window Title Validation & Filter)
-          ▼
-[ Single-Writer Thread ] ──────► [ SQLite (WAL Mode) ]
-          │                       (Persistensi Sinkron & Berurutan)
-          ▼
-[ UI Event Loop ] ─────────────► [ TUI Dashboard ]
-                                  (Visualisasi Real-time via Ratatui)
-```
+*   **Idle/AFK Detection**: Pemicu inaktivitas 3 menit yang secara otomatis menghentikan perekaman KPM (Keystrokes Per Minute). Engine akan beralih ke status `[IDLE]` (ditandai dengan badge merah pada StatusBar) dan menghitung durasi AFK secara akurat hanya saat pengguna kembali aktif.
+*   **Data Retention & SQLite Log Rotation**: Menggunakan strategi "Vacuum & Fresh Start". Saat database mencapai **50 MB**, sistem akan mengarsipkannya ke `activity.[timestamp].db.bak` dan memulai database baru. Background worker secara periodik menghapus backup lama berdasarkan kebijakan retensi di `config.toml`.
+*   **Hot-Reloading config.toml**: Menggunakan watcher konfigurasi dengan overhead rendah (polling `std::fs::metadata` setiap 60 detik). Arsitektur `Arc<RwLock>` memungkinkan perubahan aturan privasi atau filter jendela diterapkan secara *real-time* tanpa perlu merestart daemon atau UI.
+*   **Linux Input Resilience**: Handler stream `evdev` asinkron yang tangguh. Dilengkapi dengan loop koneksi ulang 5 detik untuk memulihkan diri secara dinamis dari kesalahan *hot-plug* atau diskoneksi perangkat periferal.
 
 ---
 
-## 🗺️ Peta Codebase Menyeluruh (Technical Blueprint)
+## ⌨️ TUI Control & Navigation Matrix
 
-### Core Configurations & Orchestration
+Berikut adalah panduan lengkap skema kontrol dan interaksi sistem:
 
-*   **`Cargo.toml`**: Mengelola dependensi minimal untuk menjaga *footprint* memori. Menggunakan `tokio` dengan fitur terbatas (macros, rt-multi-thread, signal), `ratatui` & `tui-realm` untuk UI, `rusqlite` untuk penyimpanan, serta `smallvec` dan `smol_str` untuk eliminasi alokasi heap yang tidak perlu.
-*   **`src/main.rs`**: Jantung dari aplikasi. Menginisialisasi runtime Tokio, mengatur *Custom Panic Hook* menggunakan `std::panic::set_hook` untuk memastikan terminal kembali ke mode normal jika terjadi crash via `crossterm`, serta mengorkestrasi channel asinkron antar komponen (Collector -> Engine -> Storage).
-
-### Abstraksi & Implementasi OS (`src/os/`)
-
-*   **`src/os/mod.rs`**: Mendefinisikan trait `AsyncCollector` (atau `OSInterface`) sebagai abstraksi lintas platform untuk manajemen siklus penangkapan event dan perolehan informasi jendela aktif.
-*   **`src/os/windows.rs`**: Implementasi spesifik Windows. Menggunakan Win32 API seperti `GetForegroundWindow` dan `GetWindowTextW` untuk konteks aplikasi, serta `SetWindowsHookExW` (WH_KEYBOARD_LL) untuk menangkap input keyboard tingkat rendah.
-*   **`src/os/linux.rs`**: Implementasi Linux. Menggunakan `x11-dl` untuk melacak jendela aktif di X11. Untuk input keyboard, terdapat logika *auto-detection* cerdas di `/dev/input/` (evdev) yang mampu menangani **Hot-Plug** (pemutusan/penyambungan perangkat) secara otomatis dengan prioritas pada perangkat USB eksternal.
-
-### Engine & Buffer Logic (`src/engine/`)
-
-*   **`src/engine/mod.rs`**: Bertanggung jawab atas logika *State Manager*. Memvalidasi judul jendela terhadap `exclude_list`, mengelola siklus hidup buffer teks, serta menangani deteksi status **IDLE/AFK** untuk efisiensi pelacakan.
-*   **`src/engine/buffer.rs`**: Implementasi **Stateful Text Buffer**. Menggunakan `SmallVec<[char; 64]>` untuk menyimpan input secara efisien di stack. Menangani tombol kontrol seperti `Backspace` dan `Delete` secara akurat untuk memastikan log mencerminkan teks final yang diketik pengguna. Mengimplementasikan strategi **"Immediate Flush & Swap"** saat terdeteksi perpindahan jendela aktif.
-
-### Storage Layer (`src/storage/`)
-
-*   **`src/storage/mod.rs`**: Implementasi pola **Single-Writer Thread**. Memastikan semua operasi penulisan ke database dilakukan oleh satu thread khusus untuk menghindari *locking* pada runtime asinkron.
-*   **`src/storage/db.rs`**: Konfigurasi SQLite tingkat lanjut. Menggunakan `PRAGMA journal_mode = WAL`, `PRAGMA synchronous = NORMAL`, dan `PRAGMA cache_size = -2000` (pembatasan ~2MB). Skema mencakup indeks pada kolom `timestamp` dan `app_name` untuk pencarian cepat, logika rotasi otomatis, serta **Kebijakan Retensi Data** untuk menghapus log lama secara otomatis.
-
-### User Interface (`src/ui/`)
-
-*   **`src/ui/mod.rs`**: Arsitektur UI berbasis komponen menggunakan `tui-realm` yang mengikuti pola *The Elm Architecture* (Model-Update-View).
-*   **`src/ui/components/`**: Bedah komponen spesifik:
-    *   **Activity Timeline**: Visualisasi urutan waktu aktivitas lengkap dengan metrik KPM (Keystrokes Per Minute).
-    *   **Dashboard Analytics**: Tab khusus yang menyajikan Top 5 aplikasi teraktif dan grafik batang aktivitas per jam.
-    *   **Word Detail Panel**: Menampilkan daftar kata yang ditangkap menggunakan `smol_str` untuk optimasi memori pada string pendek.
-    *   **Export Form Modal**: Antarmuka berbasis form untuk mengatur rentang tanggal dan format ekspor data.
-    *   **Purge Dialog Modal**: Dialog konfirmasi untuk pembersihan log secara aman.
+| Hotkey / Trigger | TUI Client Interaction | Core Engine State | Terminal Behavior / Impact |
+| :--- | :--- | :--- | :--- |
+| `static-memory` | Invokes & attaches interactive UI | Connected via IPC -> [RECORDING] | Terminal enters Alternative Raw Mode |
+| `Space` or `p` | Freezes/unfreezes UI stream | Switches to [PAUSED] | Halts render loop for easy data scrolling |
+| `Tab` / `Shift+Tab` | Shifts focus across UI panels | No Change | Navigates between active UI elements |
+| `Right` / `Left` / `h` / `l`| Switches active layout Tabs | No Change | Toggles between Tab 1 (Timeline) & Tab 2 (Analytics) |
+| `d` or `Ctrl + D` | Detaches interface safely | Automatically Resumes -> [RECORDING] | Restores terminal mode instantly, UI process dies |
+| `q` or `Q` | Issues total Hard Shutdown | Sends KILL signal -> [SHUTDOWN] | Gracefully cleans buffers and terminates all processes |
+| `Up` / `Down` / `j` / `k` | Scrolls lists line-by-line | No Change (Only in [PAUSED] mode) | Allows granular historical exploration |
+| `PageUp` / `PageDown` | Jumps 10 lines at a time | No Change (Only in [PAUSED] mode) | Allows rapid historical exploration |
+| `/` | Spawns interactive filter bar | No Change (Only in [PAUSED] mode) | Filters timeline apps/windows in real time |
+| `Ctrl + E` | Displays Data Export Modal | No Change | Prompts for target format (.txt/.csv) and dates |
+| `Ctrl + X` | Displays Data Purge Modal | No Change | Asks for confirmation to wipe all local records |
+| `Esc` | Dimisses active Modal window | No Change | Returns focus safely back to the main layout screen |
 
 ---
 
-## ⚙️ Panduan Konfigurasi (`config.toml`)
+## 📂 Struktur Direktori & Standar Kepatuhan
 
-Contoh konfigurasi untuk kustomisasi penuh:
+Static-Memory mematuhi standar jalur sistem operasi untuk menjaga kebersihan dan keamanan data:
 
-```toml
-[storage]
-db_path = "activity_log.db"          # Lokasi database SQLite
-rotation_size_mb = 50                # Batas ukuran rotasi log (MB)
-rotation_interval_days = 30          # Batas waktu rotasi log (hari)
-retention_days = 7                   # Hapus backup (.db.bak) setelah X hari
+### Linux (XDG Compliance)
+*   **Konfigurasi**: `~/.config/static-memory/config.toml`
+*   **Data & Sockets**: `~/.local/share/static-memory/`
 
-[engine]
-idle_threshold_seconds = 180         # Deteksi status IDLE setelah X detik tanpa input
-
-[privacy]
-# Daftar proses yang tidak akan pernah dicatat (misal: password manager)
-exclude_processes = ["bitwarden.exe", "keepassxc", "1password"]
-# Kata kunci judul jendela yang memicu jeda pencatatan
-exclude_titles = ["Incognito", "Private Browsing", "Banking", "KeePass"]
-
-[linux]
-# Jalur manual perangkat input jika auto-detection tidak diinginkan
-# keyboard_device_path = "/dev/input/event3"
-```
+### Windows (Standard AppData)
+*   **Konfigurasi & Data**: `$env:APPDATA\Static-Memory\`
 
 ---
 
-## 🚀 Otomatisasi Operasional
+## 🛠️ Otomatisasi Instalasi & Lifecycle
 
-### Linux (`install.sh` / `uninstall.sh`)
-Skrip instalasi melakukan:
-1.  Pemasangan prasyarat: `libx11-dev`, `libxtst-dev`, `libxi-dev`.
-2.  Konfigurasi grup `input` via aturan `udev` agar aplikasi dapat mengakses `/dev/input/`.
-3.  Kompilasi biner dengan flag `--release` dan optimasi ukuran.
-4.  Penyematan unit service ke `systemctl --user` untuk *auto-start* saat login.
-
-### Windows (`install.ps1` / `uninstall.ps1`)
-Skrip PowerShell melakukan:
-1.  Verifikasi hak akses Administrator.
-2.  Penempatan biner pada PATH sistem.
-3.  Injeksi Registry Run Key (`HKCU\...\Run`) untuk memastikan aplikasi berjalan saat startup tanpa prompt UAC.
-
----
-
-## ⌨️ Navigasi TUI (Shortcut Cheatsheet)
-
-| Tombol | Tindakan |
-| :--- | :--- |
-| `Tab` / `Shift+Tab` | Pindah antar Panel (Timeline, Details, Metrics) |
-| `/` | Masuk ke mode Pencarian / Filter History |
-| `Ctrl + E` | Membuka Modal Ekspor Data |
-| `Ctrl + X` | Membuka Dialog Pembersihan Data (Purge) |
-| `Esc` | Menutup Modal atau Membatalkan Pencarian |
-| `Q` | Keluar dari Aplikasi |
+*   **Single-Word Command**: Integrasi perintah tunggal `static-memory` yang disuntikkan langsung ke shell profile (Linux) atau System PATH (Windows).
+*   **Safe Execution Order**: Skrip instalasi memvalidasi dependensi sistem (seperti `libx11-dev`) melalui pengecekan kompilasi multi-tahap (`cargo build --release`) sebelum memodifikasi sistem. Tersedia rutinitas **Rollback** otomatis jika terjadi kegagalan di tengah proses.
+*   **Flexible Uninstaller**: Skrip uninstalasi memberikan pilihan eksplisit kepada pengguna untuk menghapus biner dan layanan latar belakang saja, atau menghapus seluruh database riwayat secara permanen.
 
 ---
 
