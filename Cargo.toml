@@ -1,0 +1,58 @@
+[package]
+name = "static-memory"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jules"]
+description = "Context-Aware Local System & Activity Logger"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+
+# UI & Terminal
+ratatui = "0.26"
+crossterm = "0.27"
+tuirealm = "1.9"
+
+# OS Specific
+windows-sys = { version = "0.52", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_ProcessStatus"
+], optional = true }
+x11-dl = { version = "2.21", optional = true }
+evdev = { version = "0.12", optional = true }
+
+# Data & Storage
+rusqlite = { version = "0.31", features = ["bundled", "unlock_notify"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Efficiency & Metrics
+smallvec = "1.13"
+smol_str = { version = "0.2", features = ["serde"] }
+sysinfo = "0.30"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_ProcessStatus"
+]}
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = "2.21"
+evdev = "0.12"
+
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Link Time Optimization
+codegen-units = 1   # Better optimization, slower build
+panic = 'abort'     # Remove stack unwinding for smaller binary
+strip = true        # Strip symbols
