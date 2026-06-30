@@ -55,23 +55,24 @@ Static-Memory menggunakan pipeline pemrosesan data multi-threaded yang tidak mem
 
 *   **`src/os/mod.rs`**: Mendefinisikan trait `AsyncCollector` (atau `OSInterface`) sebagai abstraksi lintas platform untuk manajemen siklus penangkapan event dan perolehan informasi jendela aktif.
 *   **`src/os/windows.rs`**: Implementasi spesifik Windows. Menggunakan Win32 API seperti `GetForegroundWindow` dan `GetWindowTextW` untuk konteks aplikasi, serta `SetWindowsHookExW` (WH_KEYBOARD_LL) untuk menangkap input keyboard tingkat rendah.
-*   **`src/os/linux.rs`**: Implementasi Linux. Menggunakan `x11-dl` untuk melacak jendela aktif di X11. Untuk input keyboard, terdapat logika *auto-detection* file descriptor di `/dev/input/` (evdev) dengan melakukan parsing pada `/proc/bus/input/devices` sebagai mekanisme *fallback* yang andal untuk lingkungan Wayland/X11.
+*   **`src/os/linux.rs`**: Implementasi Linux. Menggunakan `x11-dl` untuk melacak jendela aktif di X11. Untuk input keyboard, terdapat logika *auto-detection* cerdas di `/dev/input/` (evdev) yang mampu menangani **Hot-Plug** (pemutusan/penyambungan perangkat) secara otomatis dengan prioritas pada perangkat USB eksternal.
 
 ### Engine & Buffer Logic (`src/engine/`)
 
-*   **`src/engine/mod.rs`**: Bertanggung jawab atas logika *State Manager*. Memvalidasi judul jendela terhadap `exclude_list` dan mengelola siklus hidup buffer teks.
+*   **`src/engine/mod.rs`**: Bertanggung jawab atas logika *State Manager*. Memvalidasi judul jendela terhadap `exclude_list`, mengelola siklus hidup buffer teks, serta menangani deteksi status **IDLE/AFK** untuk efisiensi pelacakan.
 *   **`src/engine/buffer.rs`**: Implementasi **Stateful Text Buffer**. Menggunakan `SmallVec<[char; 64]>` untuk menyimpan input secara efisien di stack. Menangani tombol kontrol seperti `Backspace` dan `Delete` secara akurat untuk memastikan log mencerminkan teks final yang diketik pengguna. Mengimplementasikan strategi **"Immediate Flush & Swap"** saat terdeteksi perpindahan jendela aktif.
 
 ### Storage Layer (`src/storage/`)
 
 *   **`src/storage/mod.rs`**: Implementasi pola **Single-Writer Thread**. Memastikan semua operasi penulisan ke database dilakukan oleh satu thread khusus untuk menghindari *locking* pada runtime asinkron.
-*   **`src/storage/db.rs`**: Konfigurasi SQLite tingkat lanjut. Menggunakan `PRAGMA journal_mode = WAL`, `PRAGMA synchronous = NORMAL`, dan `PRAGMA cache_size = -2000` (pembatasan ~2MB). Skema mencakup indeks pada kolom `timestamp` dan `app_name` untuk pencarian cepat, serta logika rotasi otomatis jika file database mendekati ambang batas 50 MB.
+*   **`src/storage/db.rs`**: Konfigurasi SQLite tingkat lanjut. Menggunakan `PRAGMA journal_mode = WAL`, `PRAGMA synchronous = NORMAL`, dan `PRAGMA cache_size = -2000` (pembatasan ~2MB). Skema mencakup indeks pada kolom `timestamp` dan `app_name` untuk pencarian cepat, logika rotasi otomatis, serta **Kebijakan Retensi Data** untuk menghapus log lama secara otomatis.
 
 ### User Interface (`src/ui/`)
 
 *   **`src/ui/mod.rs`**: Arsitektur UI berbasis komponen menggunakan `tui-realm` yang mengikuti pola *The Elm Architecture* (Model-Update-View).
 *   **`src/ui/components/`**: Bedah komponen spesifik:
     *   **Activity Timeline**: Visualisasi urutan waktu aktivitas lengkap dengan metrik KPM (Keystrokes Per Minute).
+    *   **Dashboard Analytics**: Tab khusus yang menyajikan Top 5 aplikasi teraktif dan grafik batang aktivitas per jam.
     *   **Word Detail Panel**: Menampilkan daftar kata yang ditangkap menggunakan `smol_str` untuk optimasi memori pada string pendek.
     *   **Export Form Modal**: Antarmuka berbasis form untuk mengatur rentang tanggal dan format ekspor data.
     *   **Purge Dialog Modal**: Dialog konfirmasi untuk pembersihan log secara aman.
@@ -85,8 +86,12 @@ Contoh konfigurasi untuk kustomisasi penuh:
 ```toml
 [storage]
 db_path = "activity_log.db"          # Lokasi database SQLite
-rotation_size_mb = 50                # Batas ukuran rotasi log
-rotation_interval_days = 30          # Batas waktu penyimpanan log
+rotation_size_mb = 50                # Batas ukuran rotasi log (MB)
+rotation_interval_days = 30          # Batas waktu rotasi log (hari)
+retention_days = 7                   # Hapus backup (.db.bak) setelah X hari
+
+[engine]
+idle_threshold_seconds = 180         # Deteksi status IDLE setelah X detik tanpa input
 
 [privacy]
 # Daftar proses yang tidak akan pernah dicatat (misal: password manager)

@@ -85,16 +85,27 @@ impl OSInterface for LinuxOS {
 #[cfg(target_os = "linux")]
 pub fn detect_keyboard_device() -> Option<String> {
     use std::fs;
-    // Simple heuristic: look for event devices that might be keyboards
-    // In a real implementation, parse /proc/bus/input/devices
+    use evdev::Device;
+
+    let mut internal_kbd = None;
     let paths = fs::read_dir("/dev/input/").ok()?;
-    for path in paths {
-        let path = path.ok()?.path();
-        let path_str = path.to_str()?;
-        if path_str.contains("event") {
-            // Further checks could be added here
-            return Some(path_str.to_string());
+
+    for path in paths.flatten() {
+        let path_str = path.path();
+        if let Ok(mut device) = Device::open(&path_str) {
+            // Check if it's a keyboard by looking at supported keys
+            // KeyMask for essential keys (e.g., KEY_A, KEY_Z)
+            if device.supported_keys().map_or(false, |keys| keys.contains(evdev::KeyCode::KEY_A)) {
+                let name = device.name().unwrap_or("Unknown").to_lowercase();
+                let is_usb = name.contains("usb") || name.contains("external");
+
+                if is_usb {
+                    return Some(path_str.to_string_lossy().into_owned());
+                } else if internal_kbd.is_none() {
+                    internal_kbd = Some(path_str.to_string_lossy().into_owned());
+                }
+            }
         }
     }
-    None
+    internal_kbd
 }

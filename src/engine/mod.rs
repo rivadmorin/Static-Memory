@@ -6,7 +6,7 @@ use crate::os::{WindowInfo, OSInterface};
 use crate::storage::StorageCommand;
 use crate::engine::buffer::TextBuffer;
 use tokio::sync::mpsc;
-use chrono::Utc;
+use chrono::{Utc, DateTime};
 use smol_str::SmolStr;
 
 pub struct Engine<O: OSInterface> {
@@ -15,6 +15,8 @@ pub struct Engine<O: OSInterface> {
     current_window: Option<WindowInfo>,
     buffer: TextBuffer,
     storage_tx: mpsc::Sender<StorageCommand>,
+    last_input_time: DateTime<Utc>,
+    is_idle: bool,
 }
 
 impl<O: OSInterface> Engine<O> {
@@ -25,22 +27,35 @@ impl<O: OSInterface> Engine<O> {
             current_window: None,
             buffer: TextBuffer::new(),
             storage_tx,
+            last_input_time: Utc::now(),
+            is_idle: false,
         }
     }
 
     pub fn is_excluded(&self, window: &WindowInfo) -> bool {
-        // Check process name
-        if self.config.privacy.exclude_processes.iter().any(|p| p.as_str() == window.process_name) {
-            return true;
-        }
-        // Check window title
-        if self.config.privacy.exclude_titles.iter().any(|t| window.title.contains(t)) {
-            return true;
+        if let Ok(privacy) = self.config.privacy.read() {
+            // Check process name
+            if privacy.exclude_processes.iter().any(|p| p.as_str() == window.process_name) {
+                return true;
+            }
+            // Check window title
+            if privacy.exclude_titles.iter().any(|t| window.title.contains(t)) {
+                return true;
+            }
         }
         false
     }
 
     pub async fn handle_key(&mut self, key: char) {
+        let now = Utc::now();
+
+        if self.is_idle {
+            let idle_duration = now.signed_duration_since(self.last_input_time).num_seconds();
+            self.log_event(format!("[IDLE_RETURN] [AFK_DURATION: {} seconds]", idle_duration)).await;
+            self.is_idle = false;
+        }
+
+        self.last_input_time = now;
         self.check_window_switch().await;
 
         if let Some(window) = &self.current_window {
@@ -54,6 +69,34 @@ impl<O: OSInterface> Engine<O> {
         match key {
             '\u{8}' => self.buffer.backspace(), // Backspace
             _ => self.buffer.push(key),
+        }
+    }
+
+    pub async fn check_idle(&mut self) {
+        if !self.is_idle {
+            let now = Utc::now();
+            let idle_threshold = self.config.engine.idle_threshold_seconds as i64;
+            if now.signed_duration_since(self.last_input_time).num_seconds() >= idle_threshold {
+                self.is_idle = true;
+                self.flush().await; // Flush before going idle
+                self.log_event("[IDLE_START]".to_string()).await;
+            }
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.is_idle
+    }
+
+    async fn log_event(&self, message: String) {
+        if let Some(window) = &self.current_window {
+            let entry = LogEntry {
+                timestamp: Utc::now(),
+                app_name: SmolStr::new(&window.process_name),
+                window_title: SmolStr::new(&window.title),
+                buffer: message,
+            };
+            let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
         }
     }
 

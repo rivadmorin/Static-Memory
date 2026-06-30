@@ -48,7 +48,7 @@ windows-sys = { version = "0.52", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"
-evdev = "0.12"
+evdev = { version = "0.13", features = ["tokio"] }
 
 [profile.release]
 opt-level = 'z'     # Optimize for size
