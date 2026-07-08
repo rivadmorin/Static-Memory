@@ -1,3 +1,24 @@
+#!/bin/bash
+# 1. Models
+sed -i 's/pub idle_threshold_seconds: u64,/pub idle_threshold_seconds: u64,\n    pub flush_threshold_chars: usize,/g' src/models/mod.rs
+sed -i 's/idle_threshold_seconds: 180,/idle_threshold_seconds: 180,\n                flush_threshold_chars: 512,/g' src/models/mod.rs
+
+# 2. Buffer
+sed -i '/pub fn is_empty(&self) -> bool {/i \
+    pub fn len(&self) -> usize {\
+        self.buffer.len()\
+    }\
+' src/engine/buffer.rs
+
+# 3. Engine
+sed -i '/match key {/i \
+        if self.buffer.len() >= self.config.engine.flush_threshold_chars {\
+            self.flush().await;\
+        }\
+' src/engine/mod.rs
+
+# 4. Linux OS
+cat << 'INNER_EOF' > src/os/linux.rs
 use crate::os::{OSInterface, WindowInfo};
 #[cfg(target_os = "linux")]
 use std::ffi::CStr;
@@ -32,7 +53,7 @@ impl OSInterface for LinuxOS {
             let root = (xlib.XDefaultRootWindow)(display);
             let active_window_atom = (xlib.XInternAtom)(
                 display,
-                c"_NET_ACTIVE_WINDOW".as_ptr(),
+                c"_NET_ACTIVE_WINDOW".as_ptr() as *const i8,
                 xlib::False,
             );
 
@@ -58,7 +79,7 @@ impl OSInterface for LinuxOS {
                 // 1. Get Title
                 let name_atom = (xlib.XInternAtom)(
                     display,
-                    c"_NET_WM_NAME".as_ptr(),
+                    c"_NET_WM_NAME".as_ptr() as *const i8,
                     xlib::False,
                 );
                 let mut title_prop = ptr::null_mut();
@@ -88,7 +109,7 @@ impl OSInterface for LinuxOS {
                 // 2. Get PID and Process Name
                 let pid_atom = (xlib.XInternAtom)(
                     display,
-                    c"_NET_WM_PID".as_ptr(),
+                    c"_NET_WM_PID".as_ptr() as *const i8,
                     xlib::False,
                 );
                 let mut pid_prop = ptr::null_mut();
@@ -169,3 +190,12 @@ pub fn detect_keyboard_device() -> Option<String> {
     }
     internal_kbd
 }
+INNER_EOF
+
+# 5. DB Queries
+sed -i "s/length(buffer) - length(replace(buffer, ' ', '')) + 1/CASE WHEN trim(buffer) = '' THEN 0 ELSE length(trim(buffer)) - length(replace(trim(buffer), ' ', '')) + 1 END/g" src/storage/db.rs
+
+# 6. Clippy fixes (no manual_flatten to avoid block issues for now)
+sed -i 's/std::io::Error::new(std::io::ErrorKind::Other, e.to_string())/std::io::Error::other(e.to_string())/g' src/storage/db.rs
+sed -i 's/UpdateAnalytics(crate::storage::AnalyticsData)/UpdateAnalytics(Box<crate::storage::AnalyticsData>)/g' src/ui/app.rs
+sed -i 's/serde_json::to_string(&data).unwrap()/serde_json::to_string(data.as_ref()).unwrap()/g' src/ui/app.rs
