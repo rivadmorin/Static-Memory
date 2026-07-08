@@ -48,6 +48,74 @@ fn start_config_watcher(config: Config) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    let is_daemon = args.iter().any(|arg| arg == "--daemon");
+    let is_export_csv = args.iter().position(|arg| arg == "--export-csv").and_then(|i| args.get(i + 1).cloned());
+    let is_export_txt = args.iter().position(|arg| arg == "--export-txt").and_then(|i| args.get(i + 1).cloned());
+    let is_purge = args.iter().any(|arg| arg == "--purge");
+
+    let mut config = Config::default();
+
+    // Attempt to load from default config path to respect user's configured db_path
+    let config_path = crate::models::get_default_config_path();
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        if let Ok(file_config) = toml::from_str::<ConfigFile>(&content) {
+            config.storage = file_config.storage;
+        }
+    } else {
+        // If config file doesn't exist, use default XDG path for db
+        let default_dir = crate::models::get_default_data_dir();
+        std::fs::create_dir_all(&default_dir).unwrap_or_default();
+        config.storage.db_path = default_dir.join("activity_log.db").to_str().unwrap_or("activity_log.db").to_string();
+    }
+
+    if let Some(path) = is_export_csv {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                if let Err(e) = db.export_to_csv(&path) {
+                    eprintln!("Failed to export CSV: {}", e);
+                } else {
+                    println!("Exported to CSV: {}", path);
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if let Some(path) = is_export_txt {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                if let Err(e) = db.export_to_txt(&path) {
+                    eprintln!("Failed to export TXT: {}", e);
+                } else {
+                    println!("Exported to TXT: {}", path);
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_purge {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(mut db) => {
+                if let Err(e) = db.purge_all_data() {
+                    eprintln!("Failed to purge data: {}", e);
+                } else {
+                    println!("Purged all data");
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if !is_daemon {
+        // TUI will be implemented here. For now, just start normally if no IPC requested
+        // in future steps, this section would attach to IPC socket instead of starting the engine.
+    }
+
     // Terminal safety
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = crossterm::terminal::disable_raw_mode();

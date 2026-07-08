@@ -63,6 +63,48 @@ pub struct LinuxConfig {
     pub keyboard_device_path: Option<String>,
 }
 
+pub fn get_default_data_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| String::from("~")));
+        path.push(".local");
+        path.push("share");
+        path.push("static-memory");
+        path
+    }
+    #[cfg(windows)]
+    {
+        let mut path = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| String::from("C:\\ProgramData")));
+        path.push("Static-Memory");
+        path
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        std::path::PathBuf::from(".")
+    }
+}
+
+pub fn get_default_config_path() -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| String::from("~")));
+        path.push(".config");
+        path.push("static-memory");
+        path.push("config.toml");
+        path
+    }
+    #[cfg(windows)]
+    {
+        let mut path = get_default_data_dir();
+        path.push("config.toml");
+        path
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        std::path::PathBuf::from("config.toml")
+    }
+}
+
 #[allow(dead_code)]
 impl Default for Config {
     fn default() -> Self {
