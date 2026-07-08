@@ -1,21 +1,21 @@
-pub mod os;
-pub mod models;
-pub mod storage;
-pub mod engine;
 pub mod collector;
+pub mod engine;
+pub mod models;
+pub mod os;
+pub mod storage;
 pub mod ui;
 
-#[cfg(windows)]
-use crate::os::windows::WindowsOS;
+use crate::engine::Engine;
+use crate::models::{Config, ConfigFile};
 #[cfg(target_os = "linux")]
 use crate::os::linux::LinuxOS;
-use crate::models::{Config, ConfigFile};
+#[cfg(windows)]
+use crate::os::windows::WindowsOS;
 use crate::storage::db::start_storage_thread;
-use crate::engine::Engine;
-use tokio::sync::mpsc;
+use std::fs;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use std::fs;
+use tokio::sync::mpsc;
 
 fn start_config_watcher(config: Config) {
     std::thread::spawn(move || {
@@ -71,7 +71,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(any(windows, target_os = "linux")))]
     panic!("Unsupported OS");
 
-    let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(config.clone(), os, storage_tx)));
+    let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(
+        config.clone(),
+        os,
+        storage_tx,
+    )));
 
     // Start Linux collector if applicable
     #[cfg(target_os = "linux")]

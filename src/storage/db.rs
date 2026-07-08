@@ -1,11 +1,11 @@
+use crate::models::{Config, LogEntry};
+use crate::storage::{AnalyticsData, StorageCommand};
 use rusqlite::{params, Connection};
-use crate::models::{LogEntry, Config};
-use crate::storage::{StorageCommand, AnalyticsData};
-use tokio::sync::mpsc;
-use std::thread;
 use std::fs;
 use std::path::Path;
-use std::time::{SystemTime, Duration};
+use std::thread;
+use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
 
 pub struct Database {
     conn: Connection,
@@ -16,11 +16,13 @@ impl Database {
         let conn = Connection::open(path)?;
 
         // Optimizations
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
             PRAGMA cache_size = -2000;
-        ")?;
+        ",
+        )?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS activity_log (
@@ -33,8 +35,14 @@ impl Database {
             [],
         )?;
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON activity_log (timestamp)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log (app_name)", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON activity_log (timestamp)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log (app_name)",
+            [],
+        )?;
 
         Ok(Self { conn })
     }
@@ -56,11 +64,9 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT app_name, COUNT(*) as activity FROM activity_log
              WHERE timestamp > datetime('now', '-1 day')
-             GROUP BY app_name ORDER BY activity DESC LIMIT 5"
+             GROUP BY app_name ORDER BY activity DESC LIMIT 5",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -73,7 +79,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT strftime('%H', timestamp) as hour, COUNT(*) FROM activity_log
              WHERE timestamp > datetime('now', '-1 day')
-             GROUP BY hour"
+             GROUP BY hour",
         )?;
         let rows = stmt.query_map([], |row| {
             let hour_str: String = row.get(0)?;
@@ -93,17 +99,135 @@ impl Database {
     pub fn get_total_words(&self) -> rusqlite::Result<usize> {
         let mut stmt = self.conn.prepare(
             "SELECT SUM(length(buffer) - length(replace(buffer, ' ', '')) + 1) FROM activity_log
-             WHERE timestamp > datetime('now', 'start of day')"
+             WHERE timestamp > datetime('now', 'start of day')",
         )?;
         let total: Option<usize> = stmt.query_row([], |row| row.get(0))?;
         Ok(total.unwrap_or(0))
     }
 
+    pub fn get_daily_activity_trend(&self) -> rusqlite::Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date(timestamp) as day, COUNT(*) FROM activity_log
+             WHERE timestamp > datetime('now', '-7 days')
+             GROUP BY day ORDER BY day ASC",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_most_active_window_titles(&self) -> rusqlite::Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT window_title, COUNT(*) as activity FROM activity_log
+             WHERE timestamp > datetime('now', '-1 day')
+             GROUP BY window_title ORDER BY activity DESC LIMIT 5",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_total_characters(&self) -> rusqlite::Result<usize> {
+        let mut stmt = self.conn.prepare(
+            "SELECT SUM(length(buffer)) FROM activity_log
+             WHERE timestamp > datetime('now', 'start of day')",
+        )?;
+        let total: Option<usize> = stmt.query_row([], |row| row.get(0))?;
+        Ok(total.unwrap_or(0))
+    }
+
+    pub fn get_most_productive_hour(&self) -> rusqlite::Result<u32> {
+        let mut stmt = self.conn.prepare(
+            "SELECT CAST(strftime('%H', timestamp) AS INTEGER) as hour, COUNT(*) as count FROM activity_log
+             WHERE timestamp > datetime('now', 'start of day')
+             GROUP BY hour ORDER BY count DESC LIMIT 1"
+        )?;
+        let hour: Option<u32> = stmt.query_row([], |row| row.get(0)).ok();
+        Ok(hour.unwrap_or(0))
+    }
+
+    pub fn get_average_words_per_entry(&self) -> rusqlite::Result<f64> {
+        let mut stmt = self.conn.prepare(
+            "SELECT AVG(length(buffer) - length(replace(buffer, ' ', '')) + 1) FROM activity_log
+             WHERE timestamp > datetime('now', 'start of day')",
+        )?;
+        let avg: Option<f64> = stmt.query_row([], |row| row.get(0))?;
+        Ok(avg.unwrap_or(0.0))
+    }
+
+    pub fn get_longest_active_session(&self) -> rusqlite::Result<usize> {
+        // Approximate: Count of entries today. A better way would be analyzing time diffs but complex for SQLite.
+        let mut stmt = self.conn.prepare(
+            "SELECT COUNT(*) FROM activity_log WHERE timestamp > datetime('now', 'start of day')",
+        )?;
+        let count: Option<usize> = stmt.query_row([], |row| row.get(0))?;
+        Ok(count.unwrap_or(0))
+    }
+
+    pub fn get_busiest_day_of_week(&self) -> rusqlite::Result<String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT case cast(strftime('%w', timestamp) as integer)
+                when 0 then 'Sunday' when 1 then 'Monday' when 2 then 'Tuesday'
+                when 3 then 'Wednesday' when 4 then 'Thursday' when 5 then 'Friday'
+                else 'Saturday' end as day_name, COUNT(*) as count FROM activity_log
+             WHERE timestamp > datetime('now', '-7 days')
+             GROUP BY day_name ORDER BY count DESC LIMIT 1",
+        )?;
+        let day: Option<String> = stmt.query_row([], |row| row.get(0)).ok();
+        Ok(day.unwrap_or_else(|| "N/A".to_string()))
+    }
+
+    pub fn get_most_used_app_heatmap(&self) -> rusqlite::Result<Vec<(String, u32, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT app_name, CAST(strftime('%H', timestamp) AS INTEGER) as hour, COUNT(*) as count FROM activity_log
+             WHERE timestamp > datetime('now', '-1 day')
+             GROUP BY app_name, hour ORDER BY count DESC LIMIT 5"
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_recent_apps(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT app_name FROM activity_log
+             WHERE timestamp > datetime('now', '-1 day')
+             GROUP BY app_name ORDER BY MAX(timestamp) DESC LIMIT 5",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(row.get(0)?))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_total_entries(&self) -> rusqlite::Result<usize> {
+        let mut stmt = self.conn.prepare("SELECT COUNT(*) FROM activity_log")?;
+        let count: Option<usize> = stmt.query_row([], |row| row.get(0))?;
+        Ok(count.unwrap_or(0))
+    }
     pub fn check_rotation(&mut self, config: &Config) -> bool {
         if let Ok(metadata) = fs::metadata(&config.storage.db_path) {
             let size_mb = metadata.len() / (1024 * 1024);
             if size_mb >= config.storage.rotation_size_mb {
-                let backup_path = format!("{}.{}.bak", config.storage.db_path, SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs());
+                let backup_path = format!(
+                    "{}.{}.bak",
+                    config.storage.db_path,
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                );
                 if let Err(e) = fs::rename(&config.storage.db_path, &backup_path) {
                     eprintln!("Failed to rotate database: {}", e);
                     return false;
@@ -120,7 +244,9 @@ impl Database {
 }
 
 pub fn enforce_retention(config: &Config) {
-    let db_dir = Path::new(&config.storage.db_path).parent().unwrap_or(Path::new("."));
+    let db_dir = Path::new(&config.storage.db_path)
+        .parent()
+        .unwrap_or(Path::new("."));
     let retention_days = config.storage.retention_days as u64;
     let cutoff = SystemTime::now() - Duration::from_secs(retention_days * 24 * 3600);
 
@@ -142,10 +268,7 @@ pub fn enforce_retention(config: &Config) {
     }
 }
 
-pub fn start_storage_thread(
-    config: Config,
-    mut rx: mpsc::Receiver<StorageCommand>,
-) {
+pub fn start_storage_thread(config: Config, mut rx: mpsc::Receiver<StorageCommand>) {
     thread::spawn(move || {
         let mut db = Database::new(&config.storage.db_path).expect("Failed to open database");
 
@@ -169,7 +292,36 @@ pub fn start_storage_thread(
                     let top_apps = db.get_top_apps().unwrap_or_default();
                     let hourly_activity = db.get_hourly_activity().unwrap_or_default();
                     let total_words = db.get_total_words().unwrap_or_default();
-                    let _ = sender.blocking_send(AnalyticsData { top_apps, hourly_activity, total_words });
+                    let daily_activity_trend = db.get_daily_activity_trend().unwrap_or_default();
+                    let most_active_window_titles =
+                        db.get_most_active_window_titles().unwrap_or_default();
+                    let total_characters = db.get_total_characters().unwrap_or_default();
+                    let most_productive_hour = db.get_most_productive_hour().unwrap_or_default();
+                    let average_words_per_entry =
+                        db.get_average_words_per_entry().unwrap_or_default();
+                    let longest_active_session =
+                        db.get_longest_active_session().unwrap_or_default();
+                    let busiest_day_of_week = db
+                        .get_busiest_day_of_week()
+                        .unwrap_or_else(|_| "N/A".to_string());
+                    let most_used_app_heatmap = db.get_most_used_app_heatmap().unwrap_or_default();
+                    let recent_apps = db.get_recent_apps().unwrap_or_default();
+                    let total_entries = db.get_total_entries().unwrap_or_default();
+                    let _ = sender.blocking_send(AnalyticsData {
+                        top_apps,
+                        hourly_activity,
+                        total_words,
+                        daily_activity_trend,
+                        most_active_window_titles,
+                        total_characters,
+                        most_productive_hour,
+                        average_words_per_entry,
+                        longest_active_session,
+                        busiest_day_of_week,
+                        most_used_app_heatmap,
+                        recent_apps,
+                        total_entries,
+                    });
                 }
             }
         }

@@ -1,10 +1,10 @@
 use crate::os::{OSInterface, WindowInfo};
 #[cfg(target_os = "linux")]
-use x11_dl::xlib;
+use std::ffi::CStr;
 #[cfg(target_os = "linux")]
 use std::ptr;
 #[cfg(target_os = "linux")]
-use std::ffi::CStr;
+use x11_dl::xlib;
 
 pub struct LinuxOS;
 
@@ -18,7 +18,9 @@ impl OSInterface for LinuxOS {
         unsafe {
             let xlib = xlib::Xlib::open().ok()?;
             let display = (xlib.XOpenDisplay)(ptr::null());
-            if display.is_null() { return None; }
+            if display.is_null() {
+                return None;
+            }
 
             let mut root_return = 0;
             let mut child_return = 0;
@@ -29,7 +31,11 @@ impl OSInterface for LinuxOS {
             let mut mask_return = 0;
 
             let root = (xlib.XDefaultRootWindow)(display);
-            let active_window_atom = (xlib.XInternAtom)(display, "_NET_ACTIVE_WINDOW\0".as_ptr() as *const i8, xlib::False);
+            let active_window_atom = (xlib.XInternAtom)(
+                display,
+                "_NET_ACTIVE_WINDOW\0".as_ptr() as *const i8,
+                xlib::False,
+            );
 
             let mut actual_type = 0;
             let mut actual_format = 0;
@@ -38,9 +44,18 @@ impl OSInterface for LinuxOS {
             let mut prop = ptr::null_mut();
 
             (xlib.XGetWindowProperty)(
-                display, root, active_window_atom, 0, 1, xlib::False,
-                xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
-                &mut nitems, &mut bytes_after, &mut prop
+                display,
+                root,
+                active_window_atom,
+                0,
+                1,
+                xlib::False,
+                xlib::AnyPropertyType as u64,
+                &mut actual_type,
+                &mut actual_format,
+                &mut nitems,
+                &mut bytes_after,
+                &mut prop,
             );
 
             if !prop.is_null() {
@@ -48,16 +63,31 @@ impl OSInterface for LinuxOS {
                 (xlib.XFree)(prop as *mut _);
 
                 // Now get title of window_id
-                let name_atom = (xlib.XInternAtom)(display, "_NET_WM_NAME\0".as_ptr() as *const i8, xlib::False);
+                let name_atom = (xlib.XInternAtom)(
+                    display,
+                    "_NET_WM_NAME\0".as_ptr() as *const i8,
+                    xlib::False,
+                );
                 let mut title_prop = ptr::null_mut();
                 (xlib.XGetWindowProperty)(
-                    display, window_id, name_atom, 0, 1024, xlib::False,
-                    xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
-                    &mut nitems, &mut bytes_after, &mut title_prop
+                    display,
+                    window_id,
+                    name_atom,
+                    0,
+                    1024,
+                    xlib::False,
+                    xlib::AnyPropertyType as u64,
+                    &mut actual_type,
+                    &mut actual_format,
+                    &mut nitems,
+                    &mut bytes_after,
+                    &mut title_prop,
                 );
 
                 if !title_prop.is_null() {
-                    let title = CStr::from_ptr(title_prop as *const i8).to_string_lossy().into_owned();
+                    let title = CStr::from_ptr(title_prop as *const i8)
+                        .to_string_lossy()
+                        .into_owned();
                     (xlib.XFree)(title_prop as *mut _);
                     (xlib.XCloseDisplay)(display);
                     return Some(WindowInfo {
@@ -84,8 +114,8 @@ impl OSInterface for LinuxOS {
 
 #[cfg(target_os = "linux")]
 pub fn detect_keyboard_device() -> Option<String> {
-    use std::fs;
     use evdev::Device;
+    use std::fs;
 
     let mut internal_kbd = None;
     let paths = fs::read_dir("/dev/input/").ok()?;
@@ -95,7 +125,10 @@ pub fn detect_keyboard_device() -> Option<String> {
         if let Ok(mut device) = Device::open(&path_str) {
             // Check if it's a keyboard by looking at supported keys
             // KeyMask for essential keys (e.g., KEY_A, KEY_Z)
-            if device.supported_keys().map_or(false, |keys| keys.contains(evdev::KeyCode::KEY_A)) {
+            if device
+                .supported_keys()
+                .map_or(false, |keys| keys.contains(evdev::KeyCode::KEY_A))
+            {
                 let name = device.name().unwrap_or("Unknown").to_lowercase();
                 let is_usb = name.contains("usb") || name.contains("external");
 
