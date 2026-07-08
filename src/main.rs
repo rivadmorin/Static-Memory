@@ -53,6 +53,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_export_csv = args.iter().position(|arg| arg == "--export-csv").and_then(|i| args.get(i + 1).cloned());
     let is_export_txt = args.iter().position(|arg| arg == "--export-txt").and_then(|i| args.get(i + 1).cloned());
     let is_purge = args.iter().any(|arg| arg == "--purge");
+    let is_export_json = args.iter().position(|arg| arg == "--export-json").and_then(|i| args.get(i + 1).cloned());
+    let is_search = args.iter().position(|arg| arg == "--search").and_then(|i| args.get(i + 1).cloned());
+    let is_delete_app = args.iter().position(|arg| arg == "--delete-app").and_then(|i| args.get(i + 1).cloned());
+    let is_top_apps = args.iter().any(|arg| arg == "--top-apps");
+    let is_total_words = args.iter().any(|arg| arg == "--total-words");
+    let is_list_apps = args.iter().any(|arg| arg == "--list-apps");
+    let is_count_entries = args.iter().any(|arg| arg == "--count-entries");
+    let is_recent_logs = args.iter().any(|arg| arg == "--recent-logs");
+    let is_busiest_day = args.iter().any(|arg| arg == "--busiest-day");
+    let is_active_hours = args.iter().any(|arg| arg == "--active-hours");
+
+
+
+
+
+
+
+
+
+
+
+
 
     let mut config = Config::default();
 
@@ -104,6 +126,164 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("Failed to purge data: {}", e);
                 } else {
                     println!("Purged all data");
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+
+    if let Some(path) = is_export_json {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                if let Err(e) = db.export_to_json(&path) {
+                    eprintln!("Failed to export JSON: {}", e);
+                } else {
+                    println!("Exported to JSON: {}", path);
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if let Some(keyword) = is_search {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.search_logs(&keyword) {
+                    Ok(results) => {
+                        for (timestamp, app_name, window_title, buffer) in results {
+                            println!("[{}] {} ({}): {}", timestamp, app_name, window_title, buffer);
+                        }
+                    }
+                    Err(e) => eprintln!("Search failed: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if let Some(app_name) = is_delete_app {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.delete_app_logs(&app_name) {
+                    Ok(count) => println!("Deleted {} logs for app '{}'", count, app_name),
+                    Err(e) => eprintln!("Failed to delete app logs: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_top_apps {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_top_apps() {
+                    Ok(apps) => {
+                        println!("Top Apps:");
+                        for (app, count) in apps {
+                            println!("- {}: {}", app, count);
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to get top apps: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_total_words {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_total_words() {
+                    Ok(words) => println!("Total Words Typed: {}", words),
+                    Err(e) => eprintln!("Failed to get total words: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_list_apps {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.list_unique_apps() {
+                    Ok(apps) => {
+                        println!("Tracked Apps:");
+                        for app in apps {
+                            println!("- {}", app);
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to list apps: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_count_entries {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_total_entries() {
+                    Ok(count) => println!("Total Log Entries: {}", count),
+                    Err(e) => eprintln!("Failed to get entry count: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_recent_logs {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_recent_logs_full() {
+                    Ok(results) => {
+                        println!("Recent 10 Logs:");
+                        for (timestamp, app_name, window_title, buffer) in results {
+                            println!("[{}] {} ({}): {}", timestamp, app_name, window_title, buffer);
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to get recent logs: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_busiest_day {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_busiest_day_of_week() {
+                    Ok(day) => println!("Busiest Day: {}", day),
+                    Err(e) => eprintln!("Failed to get busiest day: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Could not open database: {}", e),
+        }
+        return Ok(());
+    }
+
+    if is_active_hours {
+        match crate::storage::db::Database::new(&config.storage.db_path) {
+            Ok(db) => {
+                match db.get_hourly_activity() {
+                    Ok(hours) => {
+                        println!("Hourly Activity:");
+                        for (hour, count) in hours {
+                            if count > 0 {
+                                println!("{:02}:00 - {}", hour, count);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to get hourly activity: {}", e),
                 }
             }
             Err(e) => eprintln!("Could not open database: {}", e),

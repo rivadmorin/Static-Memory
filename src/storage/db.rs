@@ -216,6 +216,81 @@ impl Database {
         let count: Option<usize> = stmt.query_row([], |row| row.get(0))?;
         Ok(count.unwrap_or(0))
     }
+    pub fn export_to_json(&self, path: &str) -> std::io::Result<()> {
+        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
+        let log_iter = stmt.query_map([], |row| {
+            let timestamp: String = row.get(0)?;
+            let app_name: String = row.get(1)?;
+            let window_title: String = row.get(2)?;
+            let buffer: String = row.get(3)?;
+            Ok(serde_json::json!({
+                "timestamp": timestamp,
+                "app_name": app_name,
+                "window_title": window_title,
+                "buffer": buffer
+            }))
+        }).map_err(|e| std::io::Error::other(e.to_string()))?;
+
+        let mut entries = Vec::new();
+        for entry in log_iter.flatten() {
+            entries.push(entry);
+        }
+
+        let json_string = serde_json::to_string_pretty(&entries).map_err(|e| std::io::Error::other(e.to_string()))?;
+        use std::io::Write;
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(json_string.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn search_logs(&self, keyword: &str) -> rusqlite::Result<Vec<(String, String, String, String)>> {
+        let keyword_param = format!("%{}%", keyword);
+        let mut stmt = self.conn.prepare(
+            "SELECT timestamp, app_name, window_title, buffer FROM activity_log
+             WHERE buffer LIKE ?1 OR window_title LIKE ?1 OR app_name LIKE ?1
+             ORDER BY timestamp DESC"
+        )?;
+        let rows = stmt.query_map([&keyword_param], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn delete_app_logs(&self, app_name: &str) -> rusqlite::Result<usize> {
+        let mut stmt = self.conn.prepare("DELETE FROM activity_log WHERE app_name = ?1")?;
+        stmt.execute([app_name])
+    }
+
+    pub fn list_unique_apps(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT app_name FROM activity_log ORDER BY app_name ASC")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_recent_logs_full(&self) -> rusqlite::Result<Vec<(String, String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT timestamp, app_name, window_title, buffer FROM activity_log
+             ORDER BY timestamp DESC LIMIT 10"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+
 
     pub fn export_to_csv(&self, path: &str) -> std::io::Result<()> {
         let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;

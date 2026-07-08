@@ -32,7 +32,7 @@ impl OSInterface for LinuxOS {
             let root = (xlib.XDefaultRootWindow)(display);
             let active_window_atom = (xlib.XInternAtom)(
                 display,
-                c"_NET_ACTIVE_WINDOW".as_ptr(),
+                c"_NET_ACTIVE_WINDOW".as_ptr() as *const i8,
                 xlib::False,
             );
 
@@ -58,7 +58,7 @@ impl OSInterface for LinuxOS {
                 // 1. Get Title
                 let name_atom = (xlib.XInternAtom)(
                     display,
-                    c"_NET_WM_NAME".as_ptr(),
+                    c"_NET_WM_NAME".as_ptr() as *const i8,
                     xlib::False,
                 );
                 let mut title_prop = ptr::null_mut();
@@ -88,7 +88,7 @@ impl OSInterface for LinuxOS {
                 // 2. Get PID and Process Name
                 let pid_atom = (xlib.XInternAtom)(
                     display,
-                    c"_NET_WM_PID".as_ptr(),
+                    c"_NET_WM_PID".as_ptr() as *const i8,
                     xlib::False,
                 );
                 let mut pid_prop = ptr::null_mut();

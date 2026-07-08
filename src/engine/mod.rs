@@ -84,6 +84,10 @@ impl<O: OSInterface> Engine<O> {
             self.flush().await;
         }
 
+        if self.buffer.len() >= self.config.engine.flush_threshold_chars {
+            self.flush().await;
+        }
+
         match key {
             '\u{8}' => self.buffer.backspace(), // Backspace
             _ => self.buffer.push(key),
