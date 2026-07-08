@@ -216,6 +216,59 @@ impl Database {
         let count: Option<usize> = stmt.query_row([], |row| row.get(0))?;
         Ok(count.unwrap_or(0))
     }
+
+    pub fn export_to_csv(&self, path: &str) -> std::io::Result<()> {
+        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let log_iter = stmt.query_map([], |row| {
+            Ok(format!("\"{}\",\"{}\",\"{}\",\"{}\"
+",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?.replace("\"", "\"\""),
+                row.get::<_, String>(2)?.replace("\"", "\"\""),
+                row.get::<_, String>(3)?.replace("\"", "\"\"")
+            ))
+        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        use std::io::Write;
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(b"Timestamp,App Name,Window Title,Buffer
+")?;
+        for log in log_iter {
+            if let Ok(log_str) = log {
+                file.write_all(log_str.as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn export_to_txt(&self, path: &str) -> std::io::Result<()> {
+        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let log_iter = stmt.query_map([], |row| {
+            Ok(format!("[{}] {} ({}): {}
+",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?.replace("\"", "\"\""),
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?
+            ))
+        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        use std::io::Write;
+        let mut file = std::fs::File::create(path)?;
+        for log in log_iter {
+            if let Ok(log_str) = log {
+                file.write_all(log_str.as_bytes())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn purge_all_data(&mut self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM activity_log", [])?;
+        self.conn.execute("VACUUM", [])?;
+        Ok(())
+    }
+
     pub fn check_rotation(&mut self, config: &Config) -> bool {
         if let Ok(metadata) = fs::metadata(&config.storage.db_path) {
             let size_mb = metadata.len() / (1024 * 1024);
@@ -322,6 +375,27 @@ pub fn start_storage_thread(config: Config, mut rx: mpsc::Receiver<StorageComman
                         recent_apps,
                         total_entries,
                     });
+                }
+                StorageCommand::ExportCsv { target_path, sender } => {
+                    let result = match db.export_to_csv(&target_path) {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    let _ = sender.blocking_send(result);
+                }
+                StorageCommand::ExportTxt { target_path, sender } => {
+                    let result = match db.export_to_txt(&target_path) {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    let _ = sender.blocking_send(result);
+                }
+                StorageCommand::PurgeAll { sender } => {
+                    let result = match db.purge_all_data() {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    let _ = sender.blocking_send(result);
                 }
             }
         }

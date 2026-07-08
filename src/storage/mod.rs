@@ -8,6 +8,17 @@ pub enum StorageCommand {
     Store(LogEntry),
     QueryHistory { sender: mpsc::Sender<Vec<LogEntry>> },
     GetAnalytics { sender: mpsc::Sender<AnalyticsData> },
+    ExportCsv {
+        target_path: String,
+        sender: mpsc::Sender<Result<(), String>>,
+    },
+    ExportTxt {
+        target_path: String,
+        sender: mpsc::Sender<Result<(), String>>,
+    },
+    PurgeAll {
+        sender: mpsc::Sender<Result<(), String>>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
