@@ -22,13 +22,13 @@ impl OSInterface for LinuxOS {
                 return None;
             }
 
-            let mut root_return = 0;
-            let mut child_return = 0;
-            let mut root_x_return = 0;
-            let mut root_y_return = 0;
-            let mut win_x_return = 0;
-            let mut win_y_return = 0;
-            let mut mask_return = 0;
+            let _root_return = 0;
+            let _child_return = 0;
+            let _root_x_return = 0;
+            let _root_y_return = 0;
+            let _win_x_return = 0;
+            let _win_y_return = 0;
+            let _mask_return = 0;
 
             let root = (xlib.XDefaultRootWindow)(display);
             let active_window_atom = (xlib.XInternAtom)(
@@ -122,12 +122,12 @@ pub fn detect_keyboard_device() -> Option<String> {
 
     for path in paths.flatten() {
         let path_str = path.path();
-        if let Ok(mut device) = Device::open(&path_str) {
+        if let Ok(device) = Device::open(&path_str) {
             // Check if it's a keyboard by looking at supported keys
             // KeyMask for essential keys (e.g., KEY_A, KEY_Z)
             if device
                 .supported_keys()
-                .map_or(false, |keys| keys.contains(evdev::KeyCode::KEY_A))
+                .is_some_and(|keys| keys.contains(evdev::KeyCode::KEY_A))
             {
                 let name = device.name().unwrap_or("Unknown").to_lowercase();
                 let is_usb = name.contains("usb") || name.contains("external");

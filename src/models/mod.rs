@@ -20,13 +20,6 @@ pub struct Config {
     pub linux: Option<LinuxConfig>,
 }
 
-fn default_privacy() -> Arc<RwLock<PrivacyConfig>> {
-    Arc::new(RwLock::new(PrivacyConfig {
-        exclude_processes: vec!["bitwarden.exe".into(), "keepassxc".into()],
-        exclude_titles: vec!["Incognito".to_string(), "Private Browsing".to_string()],
-    }))
-}
-
 impl Clone for Config {
     fn clone(&self) -> Self {
         Self {
