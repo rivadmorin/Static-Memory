@@ -1,3 +1,5 @@
+#!/bin/bash
+cat << 'README_EOF' > README.md
 # 🧠 Static-Memory: Context-Aware Local Activity Logger
 
 **Static-Memory** adalah sistem perekaman dan analitik aktivitas sistem lokal yang sangat efisien dan aman. Aplikasi ini dirancang untuk berjalan di latar belakang (daemon) dengan konsumsi memori dan CPU seminimal mungkin, sambil mencatat aktivitas produktivitas, ketikan, dan pergantian aplikasi (window) secara akurat. Data sepenuhnya disimpan secara lokal di mesin Anda dan tidak pernah dikirim ke server eksternal, menjamin kedaulatan data dan privasi 100%.
@@ -89,3 +91,4 @@ Berdasarkan sistem operasi yang digunakan, aplikasi secara cerdas memisahkan ant
 ## 🛡️ Standar Privasi dan Lisensi
 **Static-Memory** sepenuhnya mematuhi prinsip lisensi MIT.
 Proyek ini diciptakan khusus untuk analisis personal *self-quantified* secara etik dan bertanggung jawab, menghormati kedaulatan perangkat klien tanpa komunikasi web atau pelacak eksternal (*tracker*).
+README_EOF
