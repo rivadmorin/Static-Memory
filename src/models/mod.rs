@@ -42,6 +42,7 @@ pub struct StorageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfig {
     pub idle_threshold_seconds: u64,
+    pub flush_threshold_chars: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -117,6 +118,7 @@ impl Default for Config {
             },
             engine: EngineConfig {
                 idle_threshold_seconds: 180,
+                flush_threshold_chars: 512,
             },
             privacy: Arc::new(RwLock::new(PrivacyConfig {
                 exclude_processes: vec!["bitwarden.exe".into(), "keepassxc".into()],

@@ -98,7 +98,7 @@ impl Database {
 
     pub fn get_total_words(&self) -> rusqlite::Result<usize> {
         let mut stmt = self.conn.prepare(
-            "SELECT SUM(length(buffer) - length(replace(buffer, ' ', '')) + 1) FROM activity_log
+            "SELECT SUM(CASE WHEN trim(buffer) = '' THEN 0 ELSE length(trim(buffer)) - length(replace(trim(buffer), ' ', '')) + 1 END) FROM activity_log
              WHERE timestamp > datetime('now', 'start of day')",
         )?;
         let total: Option<usize> = stmt.query_row([], |row| row.get(0))?;
@@ -154,7 +154,7 @@ impl Database {
 
     pub fn get_average_words_per_entry(&self) -> rusqlite::Result<f64> {
         let mut stmt = self.conn.prepare(
-            "SELECT AVG(length(buffer) - length(replace(buffer, ' ', '')) + 1) FROM activity_log
+            "SELECT AVG(CASE WHEN trim(buffer) = '' THEN 0 ELSE length(trim(buffer)) - length(replace(trim(buffer), ' ', '')) + 1 END) FROM activity_log
              WHERE timestamp > datetime('now', 'start of day')",
         )?;
         let avg: Option<f64> = stmt.query_row([], |row| row.get(0))?;
@@ -218,7 +218,7 @@ impl Database {
     }
 
     pub fn export_to_csv(&self, path: &str) -> std::io::Result<()> {
-        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
         let log_iter = stmt.query_map([], |row| {
             Ok(format!("\"{}\",\"{}\",\"{}\",\"{}\"
 ",
@@ -227,22 +227,20 @@ impl Database {
                 row.get::<_, String>(2)?.replace("\"", "\"\""),
                 row.get::<_, String>(3)?.replace("\"", "\"\"")
             ))
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        }).map_err(|e| std::io::Error::other(e.to_string()))?;
 
         use std::io::Write;
         let mut file = std::fs::File::create(path)?;
         file.write_all(b"Timestamp,App Name,Window Title,Buffer
 ")?;
-        for log in log_iter {
-            if let Ok(log_str) = log {
-                file.write_all(log_str.as_bytes())?;
-            }
+        for log_str in log_iter.flatten() {
+            file.write_all(log_str.as_bytes())?;
         }
         Ok(())
     }
 
     pub fn export_to_txt(&self, path: &str) -> std::io::Result<()> {
-        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
         let log_iter = stmt.query_map([], |row| {
             Ok(format!("[{}] {} ({}): {}
 ",
@@ -251,14 +249,12 @@ impl Database {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?
             ))
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        }).map_err(|e| std::io::Error::other(e.to_string()))?;
 
         use std::io::Write;
         let mut file = std::fs::File::create(path)?;
-        for log in log_iter {
-            if let Ok(log_str) = log {
-                file.write_all(log_str.as_bytes())?;
-            }
+        for log_str in log_iter.flatten() {
+            file.write_all(log_str.as_bytes())?;
         }
         Ok(())
     }

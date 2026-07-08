@@ -22,7 +22,7 @@ pub enum Msg {
     None,
     AppClose,
     SwitchTab(Id),
-    UpdateAnalytics(crate::storage::AnalyticsData),
+    UpdateAnalytics(Box<crate::storage::AnalyticsData>),
     SetIdle(bool),
 }
 
@@ -69,7 +69,7 @@ impl Update<Msg> for Model {
                     &Id::Dashboard,
                     tuirealm::Attribute::Custom("data"),
                     tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(
-                        tuirealm::props::PropValue::Str(serde_json::to_string(&data).unwrap()),
+                        tuirealm::props::PropValue::Str(serde_json::to_string(data.as_ref()).unwrap()),
                     )),
                 );
                 None
