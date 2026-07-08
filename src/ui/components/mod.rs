@@ -1,8 +1,8 @@
-use tuirealm::tui::layout::Rect;
+use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::props::Alignment;
+use tuirealm::tui::layout::Rect;
 use tuirealm::tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tuirealm::{Component, Event, MockComponent, State};
-use tuirealm::command::{Cmd, CmdResult};
 
 pub mod dashboard;
 pub mod status_bar;
@@ -44,7 +44,9 @@ impl Component<crate::ui::app::Msg, crate::ui::app::Event> for TimelineComponent
         match ev {
             Event::Keyboard(key_event) => match key_event.code {
                 tuirealm::event::Key::Char('q') => Some(crate::ui::app::Msg::AppClose),
-                tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(crate::ui::app::Id::Dashboard)),
+                tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(
+                    crate::ui::app::Id::Dashboard,
+                )),
                 _ => None,
             },
             _ => None,

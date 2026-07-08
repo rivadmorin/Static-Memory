@@ -1,5 +1,5 @@
-pub mod windows;
 pub mod linux;
+pub mod windows;
 
 #[derive(Debug, Clone)]
 pub struct WindowInfo {

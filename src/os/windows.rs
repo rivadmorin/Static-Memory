@@ -1,16 +1,18 @@
 #[cfg(windows)]
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextW, SetWindowsHookExW, CallNextHookEx,
-    GetMessageW, WH_KEYBOARD_LL, WM_KEYDOWN, KBDLLHOOKSTRUCT
-};
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use windows_sys::Win32::Foundation::CloseHandle;
 #[cfg(windows)]
 use windows_sys::Win32::System::ProcessStatus::GetModuleBaseNameW;
 #[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+};
+#[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::CloseHandle;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowTextW, SetWindowsHookExW,
+    KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN,
+};
 
 use crate::os::{OSInterface, WindowInfo};
 
@@ -31,7 +33,9 @@ impl OSInterface for WindowsOS {
     fn get_active_window(&self) -> Option<WindowInfo> {
         unsafe {
             let hwnd = GetForegroundWindow();
-            if hwnd == 0 { return None; }
+            if hwnd == 0 {
+                return None;
+            }
 
             // Get Title
             let mut title_buf = [0u16; 512];

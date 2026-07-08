@@ -1,9 +1,5 @@
-use tuirealm::{
-    terminal::TerminalBridge,
-    Application,
-    Update,
-};
-use ratatui::layout::{Layout, Constraint, Direction};
+use ratatui::layout::{Constraint, Direction, Layout};
+use tuirealm::{terminal::TerminalBridge, Application, Update};
 
 // This is a minimal boilerplate for a tui-realm app
 pub struct Model {
@@ -69,11 +65,21 @@ impl Update<Msg> for Model {
                 None
             }
             Some(Msg::UpdateAnalytics(data)) => {
-                let _ = self.app.attr(&Id::Dashboard, tuirealm::Attribute::Custom("data"), tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(tuirealm::props::PropValue::Str(serde_json::to_string(&data).unwrap()))));
+                let _ = self.app.attr(
+                    &Id::Dashboard,
+                    tuirealm::Attribute::Custom("data"),
+                    tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(
+                        tuirealm::props::PropValue::Str(serde_json::to_string(&data).unwrap()),
+                    )),
+                );
                 None
             }
             Some(Msg::SetIdle(idle)) => {
-                let _ = self.app.attr(&Id::StatusBar, tuirealm::Attribute::Custom("idle"), tuirealm::AttrValue::Flag(idle));
+                let _ = self.app.attr(
+                    &Id::StatusBar,
+                    tuirealm::Attribute::Custom("idle"),
+                    tuirealm::AttrValue::Flag(idle),
+                );
                 None
             }
             _ => None,
