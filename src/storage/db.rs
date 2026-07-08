@@ -203,7 +203,7 @@ impl Database {
              WHERE timestamp > datetime('now', '-1 day')
              GROUP BY app_name ORDER BY MAX(timestamp) DESC LIMIT 5",
         )?;
-        let rows = stmt.query_map([], |row| Ok(row.get(0)?))?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
         let mut results = Vec::new();
         for row in rows {
             results.push(row?);

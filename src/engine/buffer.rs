@@ -4,6 +4,12 @@ pub struct TextBuffer {
     buffer: SmallVec<[char; 64]>,
 }
 
+impl Default for TextBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextBuffer {
     pub fn new() -> Self {
         Self {

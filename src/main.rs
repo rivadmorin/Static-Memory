@@ -87,6 +87,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    #[cfg(windows)]
+    {
+        let engine_clone = Arc::clone(&engine);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+
+        unsafe {
+            crate::os::windows::GLOBAL_SENDER = Some(tx);
+
+            std::thread::spawn(move || {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, GetMessageW, WH_KEYBOARD_LL};
+                let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(crate::os::windows::keyboard_proc), 0, 0);
+
+                let mut msg = std::mem::zeroed();
+                while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
+                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
+                }
+            });
+        }
+
+        tokio::spawn(async move {
+            while let Some(ch) = rx.recv().await {
+                let mut engine_lock = engine_clone.write().await;
+                engine_lock.handle_key(ch).await;
+            }
+        });
+    }
+
+
     // Idle check loop
     let engine_clone = Arc::clone(&engine);
     tokio::spawn(async move {
