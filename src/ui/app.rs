@@ -69,7 +69,9 @@ impl Update<Msg> for Model {
                     &Id::Dashboard,
                     tuirealm::Attribute::Custom("data"),
                     tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(
-                        tuirealm::props::PropValue::Str(serde_json::to_string(data.as_ref()).unwrap()),
+                        tuirealm::props::PropValue::Str(
+                            serde_json::to_string(data.as_ref()).unwrap(),
+                        ),
                     )),
                 );
                 None

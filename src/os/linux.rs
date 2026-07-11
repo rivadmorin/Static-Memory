@@ -2,11 +2,11 @@ use crate::os::{OSInterface, WindowInfo};
 #[cfg(target_os = "linux")]
 use std::ffi::CStr;
 #[cfg(target_os = "linux")]
+use std::fs;
+#[cfg(target_os = "linux")]
 use std::ptr;
 #[cfg(target_os = "linux")]
 use x11_dl::xlib;
-#[cfg(target_os = "linux")]
-use std::fs;
 
 pub struct LinuxOS;
 
@@ -56,11 +56,8 @@ impl OSInterface for LinuxOS {
                 (xlib.XFree)(prop as *mut _);
 
                 // 1. Get Title
-                let name_atom = (xlib.XInternAtom)(
-                    display,
-                    c"_NET_WM_NAME".as_ptr() as *const i8,
-                    xlib::False,
-                );
+                let name_atom =
+                    (xlib.XInternAtom)(display, c"_NET_WM_NAME".as_ptr() as *const i8, xlib::False);
                 let mut title_prop = ptr::null_mut();
                 (xlib.XGetWindowProperty)(
                     display,
@@ -86,11 +83,8 @@ impl OSInterface for LinuxOS {
                 }
 
                 // 2. Get PID and Process Name
-                let pid_atom = (xlib.XInternAtom)(
-                    display,
-                    c"_NET_WM_PID".as_ptr() as *const i8,
-                    xlib::False,
-                );
+                let pid_atom =
+                    (xlib.XInternAtom)(display, c"_NET_WM_PID".as_ptr() as *const i8, xlib::False);
                 let mut pid_prop = ptr::null_mut();
                 (xlib.XGetWindowProperty)(
                     display,
