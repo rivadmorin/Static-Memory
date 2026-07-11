@@ -218,37 +218,45 @@ impl Database {
     }
     pub fn export_to_json(&self, path: &str) -> std::io::Result<()> {
         let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
-        let log_iter = stmt.query_map([], |row| {
-            let timestamp: String = row.get(0)?;
-            let app_name: String = row.get(1)?;
-            let window_title: String = row.get(2)?;
-            let buffer: String = row.get(3)?;
-            Ok(serde_json::json!({
-                "timestamp": timestamp,
-                "app_name": app_name,
-                "window_title": window_title,
-                "buffer": buffer
-            }))
-        }).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let log_iter = stmt
+            .query_map([], |row| {
+                let timestamp: String = row.get(0)?;
+                let app_name: String = row.get(1)?;
+                let window_title: String = row.get(2)?;
+                let buffer: String = row.get(3)?;
+                Ok(serde_json::json!({
+                    "timestamp": timestamp,
+                    "app_name": app_name,
+                    "window_title": window_title,
+                    "buffer": buffer
+                }))
+            })
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         let mut entries = Vec::new();
         for entry in log_iter.flatten() {
             entries.push(entry);
         }
 
-        let json_string = serde_json::to_string_pretty(&entries).map_err(|e| std::io::Error::other(e.to_string()))?;
-        use std::io::Write;
-        let mut file = std::fs::File::create(path)?;
-        file.write_all(json_string.as_bytes())?;
+        let json_string = serde_json::to_string_pretty(&entries)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        use std::io::{BufWriter, Write};
+        let file = std::fs::File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        writer.write_all(json_string.as_bytes())?;
+        writer.flush()?;
         Ok(())
     }
 
-    pub fn search_logs(&self, keyword: &str) -> rusqlite::Result<Vec<(String, String, String, String)>> {
+    pub fn search_logs(
+        &self,
+        keyword: &str,
+    ) -> rusqlite::Result<Vec<(String, String, String, String)>> {
         let keyword_param = format!("%{}%", keyword);
         let mut stmt = self.conn.prepare(
             "SELECT timestamp, app_name, window_title, buffer FROM activity_log
              WHERE buffer LIKE ?1 OR window_title LIKE ?1 OR app_name LIKE ?1
-             ORDER BY timestamp DESC"
+             ORDER BY timestamp DESC",
         )?;
         let rows = stmt.query_map([&keyword_param], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -261,12 +269,16 @@ impl Database {
     }
 
     pub fn delete_app_logs(&self, app_name: &str) -> rusqlite::Result<usize> {
-        let mut stmt = self.conn.prepare("DELETE FROM activity_log WHERE app_name = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("DELETE FROM activity_log WHERE app_name = ?1")?;
         stmt.execute([app_name])
     }
 
     pub fn list_unique_apps(&self) -> rusqlite::Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT DISTINCT app_name FROM activity_log ORDER BY app_name ASC")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT app_name FROM activity_log ORDER BY app_name ASC")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         let mut results = Vec::new();
         for row in rows {
@@ -278,7 +290,7 @@ impl Database {
     pub fn get_recent_logs_full(&self) -> rusqlite::Result<Vec<(String, String, String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT timestamp, app_name, window_title, buffer FROM activity_log
-             ORDER BY timestamp DESC LIMIT 10"
+             ORDER BY timestamp DESC LIMIT 10",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -290,47 +302,57 @@ impl Database {
         Ok(results)
     }
 
-
-
     pub fn export_to_csv(&self, path: &str) -> std::io::Result<()> {
         let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
-        let log_iter = stmt.query_map([], |row| {
-            Ok(format!("\"{}\",\"{}\",\"{}\",\"{}\"
+        let log_iter = stmt
+            .query_map([], |row| {
+                Ok(format!(
+                    "\"{}\",\"{}\",\"{}\",\"{}\"
 ",
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?.replace("\"", "\"\""),
-                row.get::<_, String>(2)?.replace("\"", "\"\""),
-                row.get::<_, String>(3)?.replace("\"", "\"\"")
-            ))
-        }).map_err(|e| std::io::Error::other(e.to_string()))?;
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?.replace("\"", "\"\""),
+                    row.get::<_, String>(2)?.replace("\"", "\"\""),
+                    row.get::<_, String>(3)?.replace("\"", "\"\"")
+                ))
+            })
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        use std::io::Write;
-        let mut file = std::fs::File::create(path)?;
-        file.write_all(b"Timestamp,App Name,Window Title,Buffer
-")?;
+        use std::io::{BufWriter, Write};
+        let file = std::fs::File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        writer.write_all(
+            b"Timestamp,App Name,Window Title,Buffer
+",
+        )?;
         for log_str in log_iter.flatten() {
-            file.write_all(log_str.as_bytes())?;
+            writer.write_all(log_str.as_bytes())?;
         }
+        writer.flush()?;
         Ok(())
     }
 
     pub fn export_to_txt(&self, path: &str) -> std::io::Result<()> {
         let mut stmt = self.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp ASC").map_err(|e| std::io::Error::other(e.to_string()))?;
-        let log_iter = stmt.query_map([], |row| {
-            Ok(format!("[{}] {} ({}): {}
+        let log_iter = stmt
+            .query_map([], |row| {
+                Ok(format!(
+                    "[{}] {} ({}): {}
 ",
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?.replace("\"", "\"\""),
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?
-            ))
-        }).map_err(|e| std::io::Error::other(e.to_string()))?;
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?.replace("\"", "\"\""),
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?
+                ))
+            })
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        use std::io::Write;
-        let mut file = std::fs::File::create(path)?;
+        use std::io::{BufWriter, Write};
+        let file = std::fs::File::create(path)?;
+        let mut writer = BufWriter::new(file);
         for log_str in log_iter.flatten() {
-            file.write_all(log_str.as_bytes())?;
+            writer.write_all(log_str.as_bytes())?;
         }
+        writer.flush()?;
         Ok(())
     }
 
@@ -447,14 +469,20 @@ pub fn start_storage_thread(config: Config, mut rx: mpsc::Receiver<StorageComman
                         total_entries,
                     });
                 }
-                StorageCommand::ExportCsv { target_path, sender } => {
+                StorageCommand::ExportCsv {
+                    target_path,
+                    sender,
+                } => {
                     let result = match db.export_to_csv(&target_path) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e.to_string()),
                     };
                     let _ = sender.blocking_send(result);
                 }
-                StorageCommand::ExportTxt { target_path, sender } => {
+                StorageCommand::ExportTxt {
+                    target_path,
+                    sender,
+                } => {
                     let result = match db.export_to_txt(&target_path) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e.to_string()),

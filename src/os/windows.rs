@@ -18,7 +18,6 @@ use crate::os::{OSInterface, WindowInfo};
 
 pub struct WindowsOS;
 
-
 #[cfg(windows)]
 pub static mut GLOBAL_SENDER: Option<tokio::sync::mpsc::Sender<char>> = None;
 
@@ -31,10 +30,10 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, w_param: usize, l_param: 
         let c = match kbd.vkCode {
             0x41..=0x5A => Some((kbd.vkCode as u8) as char), // A-Z
             0x30..=0x39 => Some((kbd.vkCode as u8) as char), // 0-9
-            0x20 => Some(' '), // Space
-            0x0D => Some('\n'), // Enter
-            0x08 => Some('\u{8}'), // Backspace
-            0x09 => Some('\t'), // Tab
+            0x20 => Some(' '),                               // Space
+            0x0D => Some('\n'),                              // Enter
+            0x08 => Some('\u{8}'),                           // Backspace
+            0x09 => Some('\t'),                              // Tab
             _ => None,
         };
 
@@ -46,7 +45,6 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, w_param: usize, l_param: 
     }
     CallNextHookEx(0, code, w_param, l_param)
 }
-
 
 impl OSInterface for WindowsOS {
     #[cfg(windows)]

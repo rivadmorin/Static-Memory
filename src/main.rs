@@ -50,12 +50,27 @@ fn start_config_watcher(config: Config) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let is_daemon = args.iter().any(|arg| arg == "--daemon");
-    let is_export_csv = args.iter().position(|arg| arg == "--export-csv").and_then(|i| args.get(i + 1).cloned());
-    let is_export_txt = args.iter().position(|arg| arg == "--export-txt").and_then(|i| args.get(i + 1).cloned());
+    let is_export_csv = args
+        .iter()
+        .position(|arg| arg == "--export-csv")
+        .and_then(|i| args.get(i + 1).cloned());
+    let is_export_txt = args
+        .iter()
+        .position(|arg| arg == "--export-txt")
+        .and_then(|i| args.get(i + 1).cloned());
     let is_purge = args.iter().any(|arg| arg == "--purge");
-    let is_export_json = args.iter().position(|arg| arg == "--export-json").and_then(|i| args.get(i + 1).cloned());
-    let is_search = args.iter().position(|arg| arg == "--search").and_then(|i| args.get(i + 1).cloned());
-    let is_delete_app = args.iter().position(|arg| arg == "--delete-app").and_then(|i| args.get(i + 1).cloned());
+    let is_export_json = args
+        .iter()
+        .position(|arg| arg == "--export-json")
+        .and_then(|i| args.get(i + 1).cloned());
+    let is_search = args
+        .iter()
+        .position(|arg| arg == "--search")
+        .and_then(|i| args.get(i + 1).cloned());
+    let is_delete_app = args
+        .iter()
+        .position(|arg| arg == "--delete-app")
+        .and_then(|i| args.get(i + 1).cloned());
     let is_top_apps = args.iter().any(|arg| arg == "--top-apps");
     let is_total_words = args.iter().any(|arg| arg == "--total-words");
     let is_list_apps = args.iter().any(|arg| arg == "--list-apps");
@@ -63,18 +78,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_recent_logs = args.iter().any(|arg| arg == "--recent-logs");
     let is_busiest_day = args.iter().any(|arg| arg == "--busiest-day");
     let is_active_hours = args.iter().any(|arg| arg == "--active-hours");
-
-
-
-
-
-
-
-
-
-
-
-
 
     let mut config = Config::default();
 
@@ -88,7 +91,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // If config file doesn't exist, use default XDG path for db
         let default_dir = crate::models::get_default_data_dir();
         std::fs::create_dir_all(&default_dir).unwrap_or_default();
-        config.storage.db_path = default_dir.join("activity_log.db").to_str().unwrap_or("activity_log.db").to_string();
+        config.storage.db_path = default_dir
+            .join("activity_log.db")
+            .to_str()
+            .unwrap_or("activity_log.db")
+            .to_string();
     }
 
     if let Some(path) = is_export_csv {
@@ -133,7 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-
     if let Some(path) = is_export_json {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => {
@@ -150,16 +156,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(keyword) = is_search {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.search_logs(&keyword) {
-                    Ok(results) => {
-                        for (timestamp, app_name, window_title, buffer) in results {
-                            println!("[{}] {} ({}): {}", timestamp, app_name, window_title, buffer);
-                        }
+            Ok(db) => match db.search_logs(&keyword) {
+                Ok(results) => {
+                    for (timestamp, app_name, window_title, buffer) in results {
+                        println!(
+                            "[{}] {} ({}): {}",
+                            timestamp, app_name, window_title, buffer
+                        );
                     }
-                    Err(e) => eprintln!("Search failed: {}", e),
                 }
-            }
+                Err(e) => eprintln!("Search failed: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -167,12 +174,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(app_name) = is_delete_app {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.delete_app_logs(&app_name) {
-                    Ok(count) => println!("Deleted {} logs for app '{}'", count, app_name),
-                    Err(e) => eprintln!("Failed to delete app logs: {}", e),
-                }
-            }
+            Ok(db) => match db.delete_app_logs(&app_name) {
+                Ok(count) => println!("Deleted {} logs for app '{}'", count, app_name),
+                Err(e) => eprintln!("Failed to delete app logs: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -180,17 +185,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_top_apps {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_top_apps() {
-                    Ok(apps) => {
-                        println!("Top Apps:");
-                        for (app, count) in apps {
-                            println!("- {}: {}", app, count);
-                        }
+            Ok(db) => match db.get_top_apps() {
+                Ok(apps) => {
+                    println!("Top Apps:");
+                    for (app, count) in apps {
+                        println!("- {}: {}", app, count);
                     }
-                    Err(e) => eprintln!("Failed to get top apps: {}", e),
                 }
-            }
+                Err(e) => eprintln!("Failed to get top apps: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -198,12 +201,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_total_words {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_total_words() {
-                    Ok(words) => println!("Total Words Typed: {}", words),
-                    Err(e) => eprintln!("Failed to get total words: {}", e),
-                }
-            }
+            Ok(db) => match db.get_total_words() {
+                Ok(words) => println!("Total Words Typed: {}", words),
+                Err(e) => eprintln!("Failed to get total words: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -211,17 +212,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_list_apps {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.list_unique_apps() {
-                    Ok(apps) => {
-                        println!("Tracked Apps:");
-                        for app in apps {
-                            println!("- {}", app);
-                        }
+            Ok(db) => match db.list_unique_apps() {
+                Ok(apps) => {
+                    println!("Tracked Apps:");
+                    for app in apps {
+                        println!("- {}", app);
                     }
-                    Err(e) => eprintln!("Failed to list apps: {}", e),
                 }
-            }
+                Err(e) => eprintln!("Failed to list apps: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -229,12 +228,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_count_entries {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_total_entries() {
-                    Ok(count) => println!("Total Log Entries: {}", count),
-                    Err(e) => eprintln!("Failed to get entry count: {}", e),
-                }
-            }
+            Ok(db) => match db.get_total_entries() {
+                Ok(count) => println!("Total Log Entries: {}", count),
+                Err(e) => eprintln!("Failed to get entry count: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -242,17 +239,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_recent_logs {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_recent_logs_full() {
-                    Ok(results) => {
-                        println!("Recent 10 Logs:");
-                        for (timestamp, app_name, window_title, buffer) in results {
-                            println!("[{}] {} ({}): {}", timestamp, app_name, window_title, buffer);
-                        }
+            Ok(db) => match db.get_recent_logs_full() {
+                Ok(results) => {
+                    println!("Recent 10 Logs:");
+                    for (timestamp, app_name, window_title, buffer) in results {
+                        println!(
+                            "[{}] {} ({}): {}",
+                            timestamp, app_name, window_title, buffer
+                        );
                     }
-                    Err(e) => eprintln!("Failed to get recent logs: {}", e),
                 }
-            }
+                Err(e) => eprintln!("Failed to get recent logs: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -260,12 +258,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_busiest_day {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_busiest_day_of_week() {
-                    Ok(day) => println!("Busiest Day: {}", day),
-                    Err(e) => eprintln!("Failed to get busiest day: {}", e),
-                }
-            }
+            Ok(db) => match db.get_busiest_day_of_week() {
+                Ok(day) => println!("Busiest Day: {}", day),
+                Err(e) => eprintln!("Failed to get busiest day: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -273,19 +269,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if is_active_hours {
         match crate::storage::db::Database::new(&config.storage.db_path) {
-            Ok(db) => {
-                match db.get_hourly_activity() {
-                    Ok(hours) => {
-                        println!("Hourly Activity:");
-                        for (hour, count) in hours {
-                            if count > 0 {
-                                println!("{:02}:00 - {}", hour, count);
-                            }
+            Ok(db) => match db.get_hourly_activity() {
+                Ok(hours) => {
+                    println!("Hourly Activity:");
+                    for (hour, count) in hours {
+                        if count > 0 {
+                            println!("{:02}:00 - {}", hour, count);
                         }
                     }
-                    Err(e) => eprintln!("Failed to get hourly activity: {}", e),
                 }
-            }
+                Err(e) => eprintln!("Failed to get hourly activity: {}", e),
+            },
             Err(e) => eprintln!("Could not open database: {}", e),
         }
         return Ok(());
@@ -344,8 +338,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             crate::os::windows::GLOBAL_SENDER = Some(tx);
 
             std::thread::spawn(move || {
-                use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, GetMessageW, WH_KEYBOARD_LL};
-                let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(crate::os::windows::keyboard_proc), 0, 0);
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    GetMessageW, SetWindowsHookExW, WH_KEYBOARD_LL,
+                };
+                let hook = SetWindowsHookExW(
+                    WH_KEYBOARD_LL,
+                    Some(crate::os::windows::keyboard_proc),
+                    0,
+                    0,
+                );
 
                 let mut msg = std::mem::zeroed();
                 while GetMessageW(&mut msg, 0, 0, 0) > 0 {
@@ -362,7 +363,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-
 
     // Idle check loop
     let engine_clone = Arc::clone(&engine);

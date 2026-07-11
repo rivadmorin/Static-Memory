@@ -6,8 +6,12 @@ use tokio::sync::mpsc;
 
 pub enum StorageCommand {
     Store(LogEntry),
-    QueryHistory { sender: mpsc::Sender<Vec<LogEntry>> },
-    GetAnalytics { sender: mpsc::Sender<AnalyticsData> },
+    QueryHistory {
+        sender: mpsc::Sender<Vec<LogEntry>>,
+    },
+    GetAnalytics {
+        sender: mpsc::Sender<AnalyticsData>,
+    },
     ExportCsv {
         target_path: String,
         sender: mpsc::Sender<Result<(), String>>,
