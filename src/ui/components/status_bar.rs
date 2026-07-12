@@ -1,8 +1,8 @@
-use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::props::{Alignment, Color};
 use tuirealm::tui::layout::Rect;
 use tuirealm::tui::widgets::{Block, Paragraph};
 use tuirealm::{Component, Event, MockComponent, State};
+use tuirealm::command::{Cmd, CmdResult};
 
 pub struct StatusBar {
     pub is_idle: bool,
@@ -23,11 +23,7 @@ impl MockComponent for StatusBar {
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::default())
-                .style(
-                    ratatui::style::Style::default()
-                        .fg(fg)
-                        .add_modifier(tuirealm::props::TextModifiers::BOLD),
-                )
+                .style(ratatui::style::Style::default().fg(fg).add_modifier(tuirealm::props::TextModifiers::BOLD))
                 .alignment(Alignment::Left),
             area,
         );

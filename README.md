@@ -1,91 +1,75 @@
 # 🧠 Static-Memory: Context-Aware Local Activity Logger
 
-**Static-Memory** adalah sistem perekaman dan analitik aktivitas sistem lokal yang sangat efisien dan aman. Aplikasi ini dirancang untuk berjalan di latar belakang (daemon) dengan konsumsi memori dan CPU seminimal mungkin, sambil mencatat aktivitas produktivitas, ketikan, dan pergantian aplikasi (window) secara akurat. Data sepenuhnya disimpan secara lokal di mesin Anda dan tidak pernah dikirim ke server eksternal, menjamin kedaulatan data dan privasi 100%.
-
-Proyek ini dibangun menggunakan **Rust** dengan runtime asinkron **Tokio**, memberikan presisi tinggi dalam pencatatan peristiwa tanpa menyebabkan *input lag* (jeda ketikan) pada sistem operasi.
+**Static-Memory** adalah sistem pencatatan aktivitas lokal yang ultra-efisien, dirancang khusus untuk pengguna yang mengutamakan kedaulatan data dan privasi total. Dibangun dengan Rust dan runtime asinkron Tokio, proyek ini menangkap setiap keystroke dan metrik sistem dengan presisi tinggi, memetakannya ke konteks jendela yang aktif tanpa mengorbankan performa sistem.
 
 ---
 
-## ✨ Fitur Utama (Core Features)
+## 🏗️ System Architecture & Performance Guarantees
 
-1. **Arsitektur Daemon-Client (Kinerja Maksimal)**
-   Sistem dibagi menjadi dua bagian:
-   * **Background Daemon**: Layanan tanpa antarmuka grafis yang terus berjalan di latar belakang, menangani operasi I/O, deteksi input OS, penerapan aturan privasi, dan interaksi dengan database SQLite.
-   * **Thin TUI Client (Terminal UI)**: Antarmuka yang sangat ringan (hanya memakan 10-15 MB RAM) yang dapat dipanggil saat Anda ingin melihat statistik. Berkomunikasi dengan daemon via *Local IPC (Unix Domain Sockets di Linux atau Named Pipes di Windows)*. Saat UI ditutup (`Ctrl+D`), layanan daemon tetap berjalan dengan tenang.
+Static-Memory beroperasi menggunakan **Daemon-Client Model** untuk memastikan pemisahan tugas yang bersih antara perekaman data dan visualisasi antarmuka.
 
-2. **Kinerja Ultra-Efisien (Sumber Daya Rendah)**
-   * **Memori**: Menargetkan **50 - 60 MB RAM** saat status stabil (Steady State Daemon).
-   * **CPU**: Kurang dari **1%**, bahkan saat mengetik dengan cepat.
-   * **Optimalisasi Buffer**: Algoritma cerdas secara otomatis melakukan *flush* teks ke database secara berkala (standar 512 karakter) atau langsung saat mendeteksi perpindahan *window*, menjaga konsumsi memori tetap stabil.
-   * **Ukuran Biner Terkompresi**: Dibuat menggunakan tingkat optimasi tertinggi (`opt-level = 'z'`) dipadukan dengan LTO (Link Time Optimization) menghasilkan biner tunggal mandiri (~2.3 MB).
+*   **Background Daemon**: Berjalan sebagai layanan latar belakang yang persisten. Daemon ini menangani semua operasi input OS, filter privasi, dan manajemen database SQLite secara eksklusif untuk mengeliminasi masalah *database locking*.
+*   **Thin TUI Client**: Antarmuka berbasis terminal yang ringan (~10-15 MB footprint aktif). Client berkomunikasi dengan Daemon melalui Local IPC (Unix Domain Sockets di Linux `~/.local/share/static-memory/daemon.sock` dan Named Pipes di Windows). Saat dilepaskan (detached), proses UI mati dan konsumsi sumber daya kembali ke nol, sementara Daemon tetap merekam.
 
-3. **Context-Awareness (Linux & Windows)**
-   * **Linux**: Menggunakan integrasi X11 dan membaca `/proc/<pid>/comm` untuk menentukan PID (*Process ID*) aktif serta merekam nama aplikasi dengan presisi tinggi. Mendukung deteksi keyboard dinamis via antarmuka asinkron `evdev`.
-   * **Windows**: Memanfaatkan integrasi `windows-sys` secara native tanpa memerlukan dependensi pihak ketiga, serta mampu bekerja sebagai servis "silent" (*no console window*).
-
-4. **Keamanan & Manajemen Data (Database Management)**
-   * Menggunakan **SQLite** dengan konfigurasi WAL (*Write-Ahead Logging*) untuk meminimalisasi *disk I/O* dan mempercepat performa transaksi.
-   * **Database Rotation (Rotasi Cerdas)**: Jika basis data menyentuh ambang batas **50 MB**, file otomatis diarsip ke `.bak` dan database segar akan dibuat untuk menjaga kecepatan pencarian.
-   * **Kebijakan Retensi (Auto-Purge)**: Data lama yang melewati batas hari (default: 7 hari) dihapus otomatis secara berkala.
-   * **Ekspor & Pembersihan Total**: Menyediakan opsi *Command Line Interface (CLI)* untuk ekspor langsung ke bentuk `.csv` atau `.txt`, dan perintah `--purge` untuk menyapu bersih semua data dengan aman.
-
-5. **Privasi & Hot-Reloading Konfigurasi**
-   * Menyediakan fitur daftar pengecualian (Exclude List). Perekaman dinonaktifkan secara instan jika mendeteksi *window title* (misalnya: "Incognito") atau proses aplikasi (misalnya: "bitwarden.exe") yang masuk daftar privasi Anda.
-   * **Hot-Reloading**: Aturan privasi baru yang ditambahkan di `config.toml` akan diterapkan *real-time* dalam waktu kurang dari 60 detik (menggunakan pemantauan metadata asinkron tanpa *overhead* berat), tanpa perlu *restart* daemon.
-
-6. **Analitik TUI Lanjutan (Dasbor Kinerja)**
-   Menyediakan laporan real-time tanpa delay melalui IPC:
-   * 📊 **Grafik Aktivitas Per Jam (Hourly Activity Chart)**
-   * 🏆 **Top 5 Aplikasi Paling Produktif**
-   * ⏱️ **Deteksi IDLE / AFK Otomatis** (Otomatis masuk mode istirahat jika tidak ada input setelah 3 menit).
+| Metrik | Target Performa |
+| :--- | :--- |
+| **Penggunaan RAM** | 50 - 60 MB (Steady State Daemon) |
+| **Penggunaan CPU** | < 1% (Bahkan saat aktivitas input tinggi) |
+| **Disk I/O** | Minimal (Optimasi via SQLite WAL & Batch Flushing) |
+| **Database Mode** | PRAGMA journal_mode = WAL, PRAGMA synchronous = NORMAL |
 
 ---
 
-## ⌨️ Panduan Hotkey (Matrix Navigasi TUI)
+## 🚀 Fitur Unggulan (Advanced Features)
 
-Berikut adalah kontrol antarmuka berbasis terminal (*TUI Client*) setelah Anda menjalankan `static-memory`:
-
-| Tombol (Hotkey) | Reaksi Antarmuka | Fungsi pada Mesin Utama |
-| :--- | :--- | :--- |
-| `static-memory` | Membuka TUI Client interaktif | Melakukan koneksi IPC -> Mode Perekaman Aktif |
-| `Space` atau `p` | Menjeda antarmuka (Pause UI) | Menjeda aliran data agar Anda bisa mem-filter / scroll |
-| `Tab` / `Shift+Tab` | Mengubah fokus widget UI | - |
-| `Kanan/Kiri/h/l` | Pindah tab panel utama | Berpindah antara *Timeline Data* & *Dashboard Analytics* |
-| `d` atau `Ctrl+D` | Menutup antarmuka terminal | UI Mati -> Daemon Latar Belakang terus mencatat (*Detached*) |
-| `q` atau `Q` | Shutdown / Matikan Total | Mengirim Sinyal Pembunuhan (KILL) -> Semua proses dihentikan dengan aman |
-| `Atas/Bawah/j/k` | Scroll data secara spesifik | (*Hanya aktif saat antarmuka dijeda*) |
-| `/` | Mengaktifkan Mode Pencarian | Mencari aplikasi spesifik di dalam riwayat timeline |
-| `Ctrl + E` | Memunculkan Dialog Ekspor | Pembuatan laporan (Laporan Harian ke TXT / Laporan Penuh ke CSV) |
-| `Ctrl + X` | Memunculkan Dialog Hapus | Fitur *Panic Button* (Menghapus seluruh jejak SQLite secara instan) |
-| `Esc` | Menutup panel dialog | - |
+*   **Idle/AFK Detection**: Pemicu inaktivitas 3 menit yang secara otomatis menghentikan perekaman KPM (Keystrokes Per Minute). Engine akan beralih ke status `[IDLE]` (ditandai dengan badge merah pada StatusBar) dan menghitung durasi AFK secara akurat hanya saat pengguna kembali aktif.
+*   **Data Retention & SQLite Log Rotation**: Menggunakan strategi "Vacuum & Fresh Start". Saat database mencapai **50 MB**, sistem akan mengarsipkannya ke `activity.[timestamp].db.bak` dan memulai database baru. Background worker secara periodik menghapus backup lama berdasarkan kebijakan retensi di `config.toml`.
+*   **Hot-Reloading config.toml**: Menggunakan watcher konfigurasi dengan overhead rendah (polling `std::fs::metadata` setiap 60 detik). Arsitektur `Arc<RwLock>` memungkinkan perubahan aturan privasi atau filter jendela diterapkan secara *real-time* tanpa perlu merestart daemon atau UI.
+*   **Linux Input Resilience**: Handler stream `evdev` asinkron yang tangguh. Dilengkapi dengan loop koneksi ulang 5 detik untuk memulihkan diri secara dinamis dari kesalahan *hot-plug* atau diskoneksi perangkat periferal.
 
 ---
 
-## 📂 Struktur Data dan Standar Jalur Sistem
+## ⌨️ TUI Control & Navigation Matrix
 
-Berdasarkan sistem operasi yang digunakan, aplikasi secara cerdas memisahkan antara Data (Database/Sockets) dan Konfigurasi (File `config.toml`).
+Berikut adalah panduan lengkap skema kontrol dan interaksi sistem:
 
-### 🐧 Lingkungan Linux (Standar Kepatuhan XDG)
-* **File Konfigurasi**: `~/.config/static-memory/config.toml`
-* **File Database & Socket**: `~/.local/share/static-memory/`
-
-### 🪟 Lingkungan Windows
-* **File Konfigurasi & Database**: `%APPDATA%\Static-Memory\`
-
----
-
-## 🛠️ Otomatisasi Siklus Hidup (Life Cycle & Install)
-
-* **Skrip Instalasi Cerdas (Installation Scripts)**:
-   Aplikasi mencakup berkas instalasi interaktif (`install.sh` untuk Linux, `install.ps1` untuk Windows) yang:
-   1. Mengecek dependensi (misal: memeriksa ketersediaan `libx11-dev` dan `libxtst-dev` pada Debian/Ubuntu).
-   2. Melakukan proses kompilasi kode biner (`cargo build --release`).
-   3. Mengatur agar `static-memory` dieksekusi secara otomatis setiap PC menyala melalui pengaturan *systemd* user lokal atau *Windows Registry Run*.
-* **Otomatisasi Rollback (Kegagalan Aman)**: Jika proses perpindahan *binary* ke `/usr/local/bin` atau modifikasi profil gagal, skrip akan mengembalikan kondisi sistem ke semula (*idempotent*).
-* **Uninstaller Lengkap**: Menggunakan `uninstall.sh` (Linux) atau `uninstall.ps1` (Windows), memungkinkan Anda untuk sekadar mencabut *binary* dari sistem atau menghapus total seluruh *database riwayat* hingga ke akar.
+| Hotkey / Trigger | TUI Client Interaction | Core Engine State | Terminal Behavior / Impact |
+| :--- | :--- | :--- | :--- |
+| `static-memory` | Invokes & attaches interactive UI | Connected via IPC -> [RECORDING] | Terminal enters Alternative Raw Mode |
+| `Space` or `p` | Freezes/unfreezes UI stream | Switches to [PAUSED] | Halts render loop for easy data scrolling |
+| `Tab` / `Shift+Tab` | Shifts focus across UI panels | No Change | Navigates between active UI elements |
+| `Right` / `Left` / `h` / `l`| Switches active layout Tabs | No Change | Toggles between Tab 1 (Timeline) & Tab 2 (Analytics) |
+| `d` or `Ctrl + D` | Detaches interface safely | Automatically Resumes -> [RECORDING] | Restores terminal mode instantly, UI process dies |
+| `q` or `Q` | Issues total Hard Shutdown | Sends KILL signal -> [SHUTDOWN] | Gracefully cleans buffers and terminates all processes |
+| `Up` / `Down` / `j` / `k` | Scrolls lists line-by-line | No Change (Only in [PAUSED] mode) | Allows granular historical exploration |
+| `PageUp` / `PageDown` | Jumps 10 lines at a time | No Change (Only in [PAUSED] mode) | Allows rapid historical exploration |
+| `/` | Spawns interactive filter bar | No Change (Only in [PAUSED] mode) | Filters timeline apps/windows in real time |
+| `Ctrl + E` | Displays Data Export Modal | No Change | Prompts for target format (.txt/.csv) and dates |
+| `Ctrl + X` | Displays Data Purge Modal | No Change | Asks for confirmation to wipe all local records |
+| `Esc` | Dimisses active Modal window | No Change | Returns focus safely back to the main layout screen |
 
 ---
 
-## 🛡️ Standar Privasi dan Lisensi
-**Static-Memory** sepenuhnya mematuhi prinsip lisensi MIT.
-Proyek ini diciptakan khusus untuk analisis personal *self-quantified* secara etik dan bertanggung jawab, menghormati kedaulatan perangkat klien tanpa komunikasi web atau pelacak eksternal (*tracker*).
+## 📂 Struktur Direktori & Standar Kepatuhan
+
+Static-Memory mematuhi standar jalur sistem operasi untuk menjaga kebersihan dan keamanan data:
+
+### Linux (XDG Compliance)
+*   **Konfigurasi**: `~/.config/static-memory/config.toml`
+*   **Data & Sockets**: `~/.local/share/static-memory/`
+
+### Windows (Standard AppData)
+*   **Konfigurasi & Data**: `$env:APPDATA\Static-Memory\`
+
+---
+
+## 🛠️ Otomatisasi Instalasi & Lifecycle
+
+*   **Single-Word Command**: Integrasi perintah tunggal `static-memory` yang disuntikkan langsung ke shell profile (Linux) atau System PATH (Windows).
+*   **Safe Execution Order**: Skrip instalasi memvalidasi dependensi sistem (seperti `libx11-dev`) melalui pengecekan kompilasi multi-tahap (`cargo build --release`) sebelum memodifikasi sistem. Tersedia rutinitas **Rollback** otomatis jika terjadi kegagalan di tengah proses.
+*   **Flexible Uninstaller**: Skrip uninstalasi memberikan pilihan eksplisit kepada pengguna untuk menghapus biner dan layanan latar belakang saja, atau menghapus seluruh database riwayat secara permanen.
+
+---
+
+## 🛡️ Lisensi & Etika
+Static-Memory dilisensikan di bawah MIT. Proyek ini dibuat untuk produktivitas pribadi dan analisis diri (*self-quantified*). Harap gunakan dengan bijak dan hormati privasi orang lain.

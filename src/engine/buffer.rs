@@ -4,12 +4,6 @@ pub struct TextBuffer {
     buffer: SmallVec<[char; 64]>,
 }
 
-impl Default for TextBuffer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TextBuffer {
     pub fn new() -> Self {
         Self {
@@ -38,10 +32,6 @@ impl TextBuffer {
 
     pub fn get_string(&self) -> String {
         self.buffer.iter().collect()
-    }
-
-    pub fn len(&self) -> usize {
-        self.buffer.len()
     }
 
     pub fn is_empty(&self) -> bool {

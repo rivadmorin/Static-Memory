@@ -1,13 +1,13 @@
 pub mod buffer;
 #[cfg(test)]
 mod tests;
-use crate::engine::buffer::TextBuffer;
-use crate::models::{Config, LogEntry};
-use crate::os::{OSInterface, WindowInfo};
+use crate::models::{LogEntry, Config};
+use crate::os::{WindowInfo, OSInterface};
 use crate::storage::StorageCommand;
-use chrono::{DateTime, Utc};
-use smol_str::SmolStr;
+use crate::engine::buffer::TextBuffer;
 use tokio::sync::mpsc;
+use chrono::{Utc, DateTime};
+use smol_str::SmolStr;
 
 pub struct Engine<O: OSInterface> {
     config: Config,
@@ -35,19 +35,11 @@ impl<O: OSInterface> Engine<O> {
     pub fn is_excluded(&self, window: &WindowInfo) -> bool {
         if let Ok(privacy) = self.config.privacy.read() {
             // Check process name
-            if privacy
-                .exclude_processes
-                .iter()
-                .any(|p| p.as_str() == window.process_name)
-            {
+            if privacy.exclude_processes.iter().any(|p| p.as_str() == window.process_name) {
                 return true;
             }
             // Check window title
-            if privacy
-                .exclude_titles
-                .iter()
-                .any(|t| window.title.contains(t))
-            {
+            if privacy.exclude_titles.iter().any(|t| window.title.contains(t)) {
                 return true;
             }
         }
@@ -58,14 +50,8 @@ impl<O: OSInterface> Engine<O> {
         let now = Utc::now();
 
         if self.is_idle {
-            let idle_duration = now
-                .signed_duration_since(self.last_input_time)
-                .num_seconds();
-            self.log_event(format!(
-                "[IDLE_RETURN] [AFK_DURATION: {} seconds]",
-                idle_duration
-            ))
-            .await;
+            let idle_duration = now.signed_duration_since(self.last_input_time).num_seconds();
+            self.log_event(format!("[IDLE_RETURN] [AFK_DURATION: {} seconds]", idle_duration)).await;
             self.is_idle = false;
         }
 
@@ -80,14 +66,6 @@ impl<O: OSInterface> Engine<O> {
         }
 
         // Basic handling of special keys could be expanded
-        if self.buffer.len() >= self.config.engine.flush_threshold_chars {
-            self.flush().await;
-        }
-
-        if self.buffer.len() >= self.config.engine.flush_threshold_chars {
-            self.flush().await;
-        }
-
         match key {
             '\u{8}' => self.buffer.backspace(), // Backspace
             _ => self.buffer.push(key),
@@ -98,11 +76,7 @@ impl<O: OSInterface> Engine<O> {
         if !self.is_idle {
             let now = Utc::now();
             let idle_threshold = self.config.engine.idle_threshold_seconds as i64;
-            if now
-                .signed_duration_since(self.last_input_time)
-                .num_seconds()
-                >= idle_threshold
-            {
+            if now.signed_duration_since(self.last_input_time).num_seconds() >= idle_threshold {
                 self.is_idle = true;
                 self.flush().await; // Flush before going idle
                 self.log_event("[IDLE_START]".to_string()).await;
@@ -118,9 +92,9 @@ impl<O: OSInterface> Engine<O> {
         if let Some(window) = &self.current_window {
             let entry = LogEntry {
                 timestamp: Utc::now(),
-                app_name: SmolStr::new(&window.process_name),
-                window_title: SmolStr::new(&window.title),
-                buffer: message,
+                app_name: window.process_name.clone(),
+                window_title: window.title.clone(),
+                buffer: SmolStr::new(message),
             };
             let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
         }
@@ -130,11 +104,10 @@ impl<O: OSInterface> Engine<O> {
         let new_window = self.os.get_active_window();
 
         let switch = match (&self.current_window, &new_window) {
-            (Some(curr), Some(new)) => {
-                curr.title != new.title || curr.process_name != new.process_name
-            }
+            (Some(curr), Some(new)) => curr.title != new.title || curr.process_name != new.process_name,
             (None, Some(_)) => true,
-            _ => false,
+            (Some(_), None) => false, // Keep current window if new is none
+            (None, None) => false,
         };
 
         if switch {
@@ -148,9 +121,9 @@ impl<O: OSInterface> Engine<O> {
             if let Some(window) = &self.current_window {
                 let entry = LogEntry {
                     timestamp: Utc::now(),
-                    app_name: SmolStr::new(&window.process_name),
-                    window_title: SmolStr::new(&window.title),
-                    buffer: self.buffer.get_string(),
+                    app_name: window.process_name.clone(),
+                    window_title: window.title.clone(),
+                    buffer: SmolStr::new(self.buffer.get_string()),
                 };
                 let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
             }

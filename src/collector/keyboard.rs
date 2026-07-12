@@ -36,31 +36,36 @@ pub async fn start_evdev_collector(
             let path_clone = path.clone();
 
             tokio::spawn(async move {
-                if let Ok(device) = Device::open(&path_clone) {
-                    if let Ok(mut event_stream) = device.into_event_stream() {
-                        println!(
-                            "Listening on device: {}",
-                            event_stream.device().name().unwrap_or("Unknown")
-                        );
+                match Device::open(&path_clone) {
+                    Ok(device) => {
+                        if let Ok(mut event_stream) = device.into_event_stream() {
+                            println!(
+                                "Listening on device: {}",
+                                event_stream.device().name().unwrap_or("Unknown")
+                            );
 
-                        loop {
-                            match event_stream.next_event().await {
-                                Ok(event) => {
-                                    if event.event_type() == evdev::EventType::KEY
-                                        && event.value() == 1
-                                    {
-                                        if let Some(key) = event_code_to_char(event.code()) {
-                                            let mut engine_lock = engine_clone.write().await;
-                                            engine_lock.handle_key(key).await;
+                            loop {
+                                match event_stream.next_event().await {
+                                    Ok(event) => {
+                                        if event.event_type() == evdev::EventType::KEY
+                                            && event.value() == 1
+                                        {
+                                            if let Some(key) = event_code_to_char(event.code()) {
+                                                let mut engine_lock = engine_clone.write().await;
+                                                engine_lock.handle_key(key).await;
+                                            }
                                         }
                                     }
-                                }
-                                Err(e) => {
-                                    eprintln!("Device error on {}: {}", path_clone, e);
-                                    break;
+                                    Err(e) => {
+                                        eprintln!("Device error on {}: {}. Attempting re-scan...", path_clone, e);
+                                        break;
+                                    }
                                 }
                             }
                         }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to open device {}: {}", path_clone, e);
                     }
                 }
                 

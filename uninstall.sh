@@ -37,6 +37,8 @@ if [[ $delete_data == "y" || $delete_data == "Y" ]]; then
     rm -rf "$HOME/.config/static-memory/"
 else
     warn "Data database dan konfigurasi dipertahankan di ~/.local/share/static-memory/ dan ~/.config/static-memory/"
+    # Clean up only the socket
+    rm -f "$HOME/.local/share/static-memory/daemon.sock"
 fi
 
 success "Uninstalasi selesai."

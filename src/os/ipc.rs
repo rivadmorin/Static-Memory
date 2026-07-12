@@ -1,6 +1,7 @@
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use crate::models::{IPCMessage, IPCResponse};
 use std::error::Error;
 use std::path::PathBuf;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration};
 
 type StdError = dyn Error + Send + Sync;
@@ -8,7 +9,7 @@ type StdError = dyn Error + Send + Sync;
 pub fn get_ipc_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
-        crate::models::get_default_data_dir().join("daemon.sock")
+        crate::os::get_data_dir().join("daemon.sock")
     }
     #[cfg(windows)]
     {
@@ -28,9 +29,8 @@ pub mod linux {
 
     pub async fn listen() -> Result<UnixListener, Box<StdError>> {
         let path = get_ipc_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        let parent = path.parent().ok_or("Invalid path")?;
+        std::fs::create_dir_all(parent)?;
 
         if path.exists() {
             std::fs::remove_file(&path)?;
@@ -98,22 +98,40 @@ pub async fn connect_with_retry(max_retries: u32, retry_delay: Duration) -> Resu
     }
 }
 
-// Keep reading connection to prevent panics and handle disconnects
-pub async fn send_message<S>(stream: &mut S, msg: &str) -> Result<(), Box<StdError>>
+pub async fn send_message<S>(stream: &mut S, msg: &IPCMessage) -> Result<(), Box<StdError>>
 where S: AsyncWriteExt + Unpin {
-    let payload = msg.as_bytes();
+    let payload = serde_json::to_vec(msg)?;
     let len = (payload.len() as u32).to_le_bytes();
     stream.write_all(&len).await?;
-    stream.write_all(payload).await?;
+    stream.write_all(&payload).await?;
     Ok(())
 }
 
-pub async fn receive_response<S>(stream: &mut S) -> Result<String, Box<StdError>>
+pub async fn receive_message<S>(stream: &mut S) -> Result<IPCMessage, Box<StdError>>
 where S: AsyncReadExt + Unpin {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
     let mut payload = vec![0u8; len];
     stream.read_exact(&mut payload).await?;
-    Ok(String::from_utf8(payload)?)
+    Ok(serde_json::from_slice(&payload)?)
+}
+
+pub async fn send_response<S>(stream: &mut S, resp: &IPCResponse) -> Result<(), Box<StdError>>
+where S: AsyncWriteExt + Unpin {
+    let payload = serde_json::to_vec(resp)?;
+    let len = (payload.len() as u32).to_le_bytes();
+    stream.write_all(&len).await?;
+    stream.write_all(&payload).await?;
+    Ok(())
+}
+
+pub async fn receive_response<S>(stream: &mut S) -> Result<IPCResponse, Box<StdError>>
+where S: AsyncReadExt + Unpin {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    let mut payload = vec![0u8; len];
+    stream.read_exact(&mut payload).await?;
+    Ok(serde_json::from_slice(&payload)?)
 }

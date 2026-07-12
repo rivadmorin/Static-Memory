@@ -1,14 +1,35 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use chrono::{DateTime, Utc};
 use std::sync::{Arc, RwLock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub app_name: SmolStr,
     pub window_title: SmolStr,
-    pub buffer: String,
+    pub buffer: SmolStr,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum IPCMessage {
+    GetStatus,
+    GetTimeline { limit: usize },
+    GetAnalytics,
+    ExportData { start: DateTime<Utc>, end: DateTime<Utc>, format: String },
+    PurgeData,
+    Pause,
+    Resume,
+    Shutdown,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum IPCResponse {
+    Timeline(Vec<LogEntry>),
+    Analytics(crate::storage::AnalyticsData),
+    Status { is_paused: bool, is_idle: bool },
+    Ok,
+    Error(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +40,7 @@ pub struct Config {
     pub privacy: Arc<RwLock<PrivacyConfig>>,
     pub linux: Option<LinuxConfig>,
 }
+
 
 impl Clone for Config {
     fn clone(&self) -> Self {
@@ -42,7 +64,6 @@ pub struct StorageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfig {
     pub idle_threshold_seconds: u64,
-    pub flush_threshold_chars: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -64,65 +85,19 @@ pub struct LinuxConfig {
     pub keyboard_device_path: Option<String>,
 }
 
-pub fn get_default_data_dir() -> std::path::PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        let mut path =
-            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| String::from("~")));
-        path.push(".local");
-        path.push("share");
-        path.push("static-memory");
-        path
-    }
-    #[cfg(windows)]
-    {
-        let mut path = std::path::PathBuf::from(
-            std::env::var("APPDATA").unwrap_or_else(|_| String::from("C:\\ProgramData")),
-        );
-        path.push("Static-Memory");
-        path
-    }
-    #[cfg(not(any(target_os = "linux", windows)))]
-    {
-        std::path::PathBuf::from(".")
-    }
-}
-
-pub fn get_default_config_path() -> std::path::PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        let mut path =
-            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| String::from("~")));
-        path.push(".config");
-        path.push("static-memory");
-        path.push("config.toml");
-        path
-    }
-    #[cfg(windows)]
-    {
-        let mut path = get_default_data_dir();
-        path.push("config.toml");
-        path
-    }
-    #[cfg(not(any(target_os = "linux", windows)))]
-    {
-        std::path::PathBuf::from("config.toml")
-    }
-}
-
 #[allow(dead_code)]
 impl Default for Config {
     fn default() -> Self {
+        let data_dir = crate::os::get_data_dir();
         Self {
             storage: StorageConfig {
-                db_path: "activity_log.db".to_string(),
+                db_path: data_dir.join("activity_log.db").to_string_lossy().to_string(),
                 rotation_size_mb: 50,
                 rotation_interval_days: 30,
                 retention_days: 7,
             },
             engine: EngineConfig {
-                idle_threshold_seconds: 180,
-                flush_threshold_chars: 512,
+                idle_threshold_seconds: 180, // 3 minutes
             },
             privacy: Arc::new(RwLock::new(PrivacyConfig {
                 exclude_processes: vec!["bitwarden.exe".into(), "keepassxc".into()],

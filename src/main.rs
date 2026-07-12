@@ -1,31 +1,33 @@
-pub mod collector;
-pub mod engine;
-pub mod models;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 pub mod os;
+pub mod models;
 pub mod storage;
+pub mod engine;
+pub mod collector;
 pub mod ui;
 
-use crate::engine::Engine;
-use crate::models::{Config, ConfigFile};
-#[cfg(target_os = "linux")]
-use crate::os::linux::LinuxOS;
 #[cfg(windows)]
 use crate::os::windows::WindowsOS;
+#[cfg(target_os = "linux")]
+use crate::os::linux::LinuxOS;
+use chrono::Utc;
+use crate::models::{Config, ConfigFile};
 use crate::storage::db::start_storage_thread;
-use std::fs;
+use crate::engine::Engine;
+use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::mpsc;
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+use std::fs;
 
 fn setup_logging(is_daemon: bool) -> Option<WorkerGuard> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     
     // File appender
     let file_appender = tracing_appender::rolling::daily(
-        crate::models::get_default_data_dir().join("logs"),
+        crate::os::get_data_dir().join("logs"),
         "static-memory.log",
     );
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
@@ -67,19 +69,21 @@ fn setup_logging(is_daemon: bool) -> Option<WorkerGuard> {
 
 fn start_config_watcher(config: Config) {
     std::thread::spawn(move || {
-        let config_path = "config.toml";
-        let mut last_modified = fs::metadata(config_path)
+        let config_dir = crate::os::get_config_dir();
+        let config_path = config_dir.join("config.toml");
+
+        let mut last_modified = fs::metadata(&config_path)
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
 
         loop {
             std::thread::sleep(Duration::from_secs(60));
 
-            if let Ok(metadata) = fs::metadata(config_path) {
+            if let Ok(metadata) = fs::metadata(&config_path) {
                 if let Ok(modified) = metadata.modified() {
                     if modified > last_modified {
                         last_modified = modified;
-                        if let Ok(content) = fs::read_to_string(config_path) {
+                        if let Ok(content) = fs::read_to_string(&config_path) {
                             if let Ok(new_config_file) = toml::from_str::<ConfigFile>(&content) {
                                 if let Ok(mut privacy) = config.privacy.write() {
                                     *privacy = new_config_file.privacy;
@@ -97,7 +101,7 @@ fn start_config_watcher(config: Config) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let is_daemon = args.iter().any(|arg| arg == "--daemon");
+let is_daemon = args.iter().any(|arg| arg == "--daemon");
     let _guard = setup_logging(is_daemon);
     let is_export_csv = args
         .iter()
@@ -130,22 +134,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut config = Config::default();
 
-    // Attempt to load from default config path to respect user's configured db_path
-    let config_path = crate::models::get_default_config_path();
-    if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if let Ok(file_config) = toml::from_str::<ConfigFile>(&content) {
-            config.storage = file_config.storage;
-        }
+    if is_daemon {
+        run_daemon().await?;
     } else {
-        // If config file doesn't exist, use default XDG path for db
-        let default_dir = crate::models::get_default_data_dir();
+// If config file doesn't exist, use default XDG path for db
+        let default_dir = crate::os::get_data_dir();
         std::fs::create_dir_all(&default_dir).unwrap_or_default();
         config.storage.db_path = default_dir
             .join("activity_log.db")
             .to_str()
             .unwrap_or("activity_log.db")
             .to_string();
-    }
 
     if let Some(path) = is_export_csv {
         match crate::storage::db::Database::new(&config.storage.db_path) {
@@ -334,18 +333,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if !is_daemon {
-        // TUI Client with robust retry and auto-reconnect logic
-        if let Err(e) = run_tui_client().await {
-            eprintln!("TUI Error: {}", e);
-        }
-        return Ok(());
+    run_client().await?;
     }
+    Ok(())
+}
 
-    // Terminal safety
+async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    // Terminal safety (even in daemon, for logs/panic)
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = crossterm::terminal::disable_raw_mode();
-        error!("\n\rApplication crashed: {:?}", panic_info);
+error!("\n\rDaemon crashed: {:?}", panic_info);
+        eprintln!("\n\rDaemon crashed: {:?}", panic_info);
     }));
 
     let config = Config::default();
@@ -365,11 +363,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(any(windows, target_os = "linux")))]
     panic!("Unsupported OS");
 
-    let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(
-        config.clone(),
-        os,
-        storage_tx,
-    )));
+    let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(config.clone(), os, storage_tx.clone())));
+
+#[cfg(windows)]
+    {
+        let engine_clone = Arc::clone(&engine);
+        let (tx, mut rx) = mpsc::channel(100);
+        crate::os::windows::start_windows_hook(tx);
+        tokio::spawn(async move {
+            while let Some(key) = rx.recv().await {
+                let mut engine_lock = engine_clone.write().await;
+                engine_lock.handle_key(key).await;
+            }
+        });
+    }
 
     // Start Linux collector if applicable
     #[cfg(all(target_os = "linux", feature = "evdev_support"))]
@@ -381,41 +388,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    #[cfg(windows)]
-    {
-        let engine_clone = Arc::clone(&engine);
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
-
-        unsafe {
-            crate::os::windows::GLOBAL_SENDER = Some(tx);
-
-            std::thread::spawn(move || {
-                use windows_sys::Win32::UI::WindowsAndMessaging::{
-                    GetMessageW, SetWindowsHookExW, WH_KEYBOARD_LL,
-                };
-                let hook = SetWindowsHookExW(
-                    WH_KEYBOARD_LL,
-                    Some(crate::os::windows::keyboard_proc),
-                    0,
-                    0,
-                );
-
-                let mut msg = std::mem::zeroed();
-                while GetMessageW(&mut msg, 0, 0, 0) > 0 {
-                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
-                    let _ = windows_sys::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
-                }
-            });
-        }
-
-        tokio::spawn(async move {
-            while let Some(ch) = rx.recv().await {
-                let mut engine_lock = engine_clone.write().await;
-                engine_lock.handle_key(ch).await;
-            }
-        });
-    }
-
     // Idle check loop
     let engine_clone = Arc::clone(&engine);
     tokio::spawn(async move {
@@ -424,15 +396,142 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             interval.tick().await;
             let mut engine_lock = engine_clone.write().await;
             engine_lock.check_idle().await;
-            // TODO: In a real app, communicate idle status to UI via a channel or shared state
         }
     });
 
-    info!("Static-Memory started. Press Ctrl+C to exit.");
+info!("Static-Memory Daemon started.");
+    
+    // Start IPC Server
+    let engine_ipc = Arc::clone(&engine);
+    let storage_ipc = storage_tx.clone();
 
-    // This is where collectors would send events to the engine
-    // For this boilerplate, we'll just run a simple loop or wait
+    #[cfg(target_os = "linux")]
+    tokio::spawn(async move {
+        if let Ok(listener) = crate::os::ipc::linux::listen().await {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let storage = storage_ipc.clone();
+                let engine_conn = Arc::clone(&engine_ipc);
+                tokio::spawn(async move {
+                    while let Ok(msg) = crate::os::ipc::receive_message(&mut stream).await {
+                        use crate::models::{IPCMessage, IPCResponse};
+                        let response = match msg {
+                            IPCMessage::GetAnalytics => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
+                                if let Some(data) = rx.recv().await {
+                                    IPCResponse::Analytics(data)
+                                } else {
+                                    IPCResponse::Error("Failed to get analytics".into())
+                                }
+                            }
+                            IPCMessage::ExportData { start, end, format } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let fmt_clone = format.clone();
+                                let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
+                                if let Some(data) = rx.recv().await {
+                                    let data_dir = crate::os::get_data_dir();
+                                    let export_dir = data_dir.join("exports");
+                                    let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
+                                    let _ = std::fs::create_dir_all(&export_dir);
+                                    if std::fs::write(&filename, data).is_ok() {
+                                        IPCResponse::Ok
+                                    } else {
+                                        IPCResponse::Error("Failed to write export file".into())
+                                    }
+                                } else {
+                                    IPCResponse::Error("Export failed".into())
+                                }
+                            }
+                            IPCMessage::GetTimeline { limit: _ } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
+                                if let Some(history) = rx.recv().await {
+                                    IPCResponse::Timeline(history)
+                                } else {
+                                    IPCResponse::Error("Failed to get timeline".into())
+                                }
+                            }
+                            IPCMessage::Shutdown => {
+                                let _ = crate::os::ipc::send_response(&mut stream, &IPCResponse::Ok).await;
+                                std::process::exit(0);
+                            }
+                            IPCMessage::GetStatus => {
+                                let engine_lock = engine_conn.read().await;
+                                IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
+                            }
+                            _ => IPCResponse::Error("Not implemented".into()),
+                        };
+                        let _ = crate::os::ipc::send_response(&mut stream, &response).await;
+                    }
+                });
+            }
+        }
+    });
 
+    #[cfg(windows)]
+    tokio::spawn(async move {
+        while let Ok(mut server) = crate::os::ipc::windows::listen() {
+            if server.connect().await.is_ok() {
+                let storage = storage_ipc.clone();
+                let engine_conn = Arc::clone(&engine_ipc);
+                tokio::spawn(async move {
+                    while let Ok(msg) = crate::os::ipc::receive_message(&mut server).await {
+                        use crate::models::{IPCMessage, IPCResponse};
+                        let response = match msg {
+                            IPCMessage::GetAnalytics => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
+                                if let Some(data) = rx.recv().await {
+                                    IPCResponse::Analytics(data)
+                                } else {
+                                    IPCResponse::Error("Failed to get analytics".into())
+                                }
+                            }
+                            IPCMessage::ExportData { start, end, format } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let fmt_clone = format.clone();
+                                let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
+                                if let Some(data) = rx.recv().await {
+                                    let data_dir = crate::os::get_data_dir();
+                                    let export_dir = data_dir.join("exports");
+                                    let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
+                                    let _ = std::fs::create_dir_all(&export_dir);
+                                    if std::fs::write(&filename, data).is_ok() {
+                                        IPCResponse::Ok
+                                    } else {
+                                        IPCResponse::Error("Failed to write export file".into())
+                                    }
+                                } else {
+                                    IPCResponse::Error("Export failed".into())
+                                }
+                            }
+                            IPCMessage::GetTimeline { limit: _ } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
+                                if let Some(history) = rx.recv().await {
+                                    IPCResponse::Timeline(history)
+                                } else {
+                                    IPCResponse::Error("Failed to get timeline".into())
+                                }
+                            }
+                            IPCMessage::Shutdown => {
+                                let _ = crate::os::ipc::send_response(&mut server, &IPCResponse::Ok).await;
+                                std::process::exit(0);
+                            }
+                            IPCMessage::GetStatus => {
+                                let engine_lock = engine_conn.read().await;
+                                IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
+                            }
+                            _ => IPCResponse::Error("Not implemented".into()),
+                        };
+                        let _ = crate::os::ipc::send_response(&mut server, &response).await;
+                    }
+                });
+            }
+        }
+    });
+
+    println!("Static-Memory Daemon started.");
     tokio::signal::ctrl_c().await?;
     let mut engine_lock = engine.write().await;
     engine_lock.flush().await;
@@ -440,52 +539,123 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_tui_client() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
     use crate::os::ipc::connect_with_retry;
     use tokio::time::Duration;
-
-    println!("Starting TUI Client, waiting for daemon...");
     
     // Auto-reconnect loop
     loop {
-        // Attempt to connect, retry infinitely if the daemon restarts
+        // Attempt to connect
         let stream_res = connect_with_retry(u32::MAX, Duration::from_secs(2)).await;
-        
         match stream_res {
             Ok(mut stream) => {
-                // To keep it simple, since the app logic is not fully present for UI, we just simulate the client logic here
-                // In a real application, you'd mount the application components here and run the tuirealm loop.
-                // We'll simulate receiving/sending data for now.
-                
-                // Usually this is where `let mut model = crate::ui::setup_app();` would be.
-                println!("Connected to Daemon!");
-                
-                // For this challenge, we just ensure it doesn't panic when stream dies, but continues reconnecting.
-                let mut interval = tokio::time::interval(Duration::from_secs(1));
-                loop {
-                    interval.tick().await;
-                    
-                    // Simple ping to check if still connected
-                    if let Err(_) = crate::os::ipc::send_message(&mut stream, "PING").await {
-                        println!("Lost connection to daemon. Attempting to reconnect...");
-                        break; // Break the inner loop to reconnect
-                    }
-                    
-                    match crate::os::ipc::receive_response(&mut stream).await {
-                        Ok(_resp) => {
-                            // In real app, update UI model
+                use crate::ui::setup_app;
+                use tuirealm::Update;
+                let mut model = setup_app();
+                let _ = model.terminal.enter_alternate_screen();
+                let _ = model.terminal.enable_raw_mode();
+
+                let mut last_sync = std::time::Instant::now() - Duration::from_secs(5);
+                let mut last_tab = model.active_tab;
+                let mut connection_lost = false;
+
+                while !model.quit && !connection_lost {
+                    if let Ok(events) = model.app.tick(tuirealm::PollStrategy::Once) {
+                        for event in events {
+                            if let Some(crate::ui::app::Msg::ExportExecuted(fmt)) = model.update(Some(event)) {
+                                let now = Utc::now();
+                                let start = now - chrono::Duration::days(7);
+                                if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::ExportData { start, end: now, format: fmt }).await {
+                                    connection_lost = true;
+                                    break;
+                                }
+                                if let Err(_) = crate::os::ipc::receive_response(&mut stream).await {
+                                    connection_lost = true;
+                                    break;
+                                }
+                                model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
+                            }
                         }
-                        Err(_) => {
-                            println!("Failed to read from daemon. Reconnecting...");
-                            break; // Daemon likely died
-                        }
                     }
+
+                    if connection_lost {
+                        break;
+                    }
+
+                    let now = std::time::Instant::now();
+                    let force_sync = model.active_tab != last_tab;
+
+                    if force_sync || now.duration_since(last_sync) >= Duration::from_secs(2) {
+                        // Sync State
+                        if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetStatus).await {
+                            connection_lost = true;
+                            break;
+                        }
+                        match crate::os::ipc::receive_response(&mut stream).await {
+                            Ok(crate::models::IPCResponse::Status { is_idle, .. }) => {
+                                model.update(Some(crate::ui::app::Msg::SetIdle(is_idle)));
+                            }
+                            Ok(_) => {}
+                            Err(_) => {
+                                connection_lost = true;
+                                break;
+                            }
+                        }
+
+                        // Request data from daemon
+                        if model.active_tab == crate::ui::Id::Timeline {
+                            if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetTimeline { limit: 50 }).await {
+                                connection_lost = true;
+                                break;
+                            }
+                            match crate::os::ipc::receive_response(&mut stream).await {
+                                Ok(crate::models::IPCResponse::Timeline(history)) => {
+                                    model.update(Some(crate::ui::app::Msg::UpdateTimeline(history)));
+                                }
+                                Ok(_) => {}
+                                Err(_) => {
+                                    connection_lost = true;
+                                    break;
+                                }
+                            }
+                        } else if model.active_tab == crate::ui::Id::Dashboard {
+                            if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetAnalytics).await {
+                                connection_lost = true;
+                                break;
+                            }
+                            match crate::os::ipc::receive_response(&mut stream).await {
+                                Ok(crate::models::IPCResponse::Analytics(data)) => {
+                                    model.update(Some(crate::ui::app::Msg::UpdateAnalytics(data)));
+                                }
+                                Ok(_) => {}
+                                Err(_) => {
+                                    connection_lost = true;
+                                    break;
+                                }
+                            }
+                        }
+                        last_sync = now;
+                        last_tab = model.active_tab;
+                    }
+
+                    model.view();
                 }
+
+                let _ = model.terminal.leave_alternate_screen();
+                let _ = model.terminal.disable_raw_mode();
+                
+                if model.quit {
+                    break;
+                }
+                
+                // If connection was lost, print status message and loop back to reconnect
+                println!("Lost connection to daemon. Reconnecting in 2 seconds...");
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
             Err(e) => {
-                eprintln!("Failed to connect to daemon: {}", e);
-                // The connect_with_retry handles delay, so we can just loop back
+                eprintln!("Failed to connect to daemon: {}. Retrying...", e);
             }
         }
     }
+    Ok(())
 }

@@ -13,15 +13,25 @@ pub struct LinuxOS;
 impl OSInterface for LinuxOS {
     #[cfg(all(target_os = "linux", feature = "x11"))]
     fn get_active_window(&self) -> Option<WindowInfo> {
+        // Basic X11 implementation for window title
+        // In a real scenario, we'd use XGetWindowProperty for _NET_ACTIVE_WINDOW
+        // and _NET_WM_NAME or WM_CLASS for process name.
+
         unsafe {
-            let xlib = match xlib::Xlib::open() {
-                Ok(x) => x,
-                Err(_) => return None,
-            };
+            let xlib = xlib::Xlib::open().ok()?;
             let display = (xlib.XOpenDisplay)(ptr::null());
-            if display.is_null() {
-                return None;
-            }
+            if display.is_null() { return None; }
+
+            let _root_return = 0;
+            let _child_return = 0;
+            let _root_x_return = 0;
+            let _root_y_return = 0;
+            let _win_x_return = 0;
+            let _win_y_return = 0;
+            let _mask_return = 0;
+
+            let root = (xlib.XDefaultRootWindow)(display);
+            let active_window_atom = (xlib.XInternAtom)(display, "_NET_ACTIVE_WINDOW\0".as_ptr() as *const i8, xlib::False);
 
             let mut actual_type = 0;
             let mut actual_format = 0;
@@ -29,100 +39,41 @@ impl OSInterface for LinuxOS {
             let mut bytes_after = 0;
             let mut prop = ptr::null_mut();
 
-            let root = (xlib.XDefaultRootWindow)(display);
-            let active_window_atom = (xlib.XInternAtom)(
-                display,
-                c"_NET_ACTIVE_WINDOW".as_ptr() as *const i8,
-                xlib::False,
-            );
-
             (xlib.XGetWindowProperty)(
-                display,
-                root,
-                active_window_atom,
-                0,
-                1,
-                xlib::False,
-                xlib::AnyPropertyType as u64,
-                &mut actual_type,
-                &mut actual_format,
-                &mut nitems,
-                &mut bytes_after,
-                &mut prop,
+                display, root, active_window_atom, 0, 1, xlib::False,
+                xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
+                &mut nitems, &mut bytes_after, &mut prop
             );
 
             if !prop.is_null() {
                 let window_id = *(prop as *const xlib::Window);
                 (xlib.XFree)(prop as *mut _);
 
-                // 1. Get Title
-                let name_atom =
-                    (xlib.XInternAtom)(display, c"_NET_WM_NAME".as_ptr() as *const i8, xlib::False);
+                // Now get title of window_id
+                let name_atom = (xlib.XInternAtom)(display, "_NET_WM_NAME\0".as_ptr() as *const i8, xlib::False);
                 let mut title_prop = ptr::null_mut();
                 (xlib.XGetWindowProperty)(
-                    display,
-                    window_id,
-                    name_atom,
-                    0,
-                    1024,
-                    xlib::False,
-                    xlib::AnyPropertyType as u64,
-                    &mut actual_type,
-                    &mut actual_format,
-                    &mut nitems,
-                    &mut bytes_after,
-                    &mut title_prop,
+                    display, window_id, name_atom, 0, 1024, xlib::False,
+                    xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
+                    &mut nitems, &mut bytes_after, &mut title_prop
                 );
 
-                let mut title = "Linux Window".to_string();
                 if !title_prop.is_null() {
-                    title = CStr::from_ptr(title_prop as *const i8)
-                        .to_string_lossy()
-                        .into_owned();
+                    let title = CStr::from_ptr(title_prop as *const i8).to_string_lossy().into_owned();
                     (xlib.XFree)(title_prop as *mut _);
+                    (xlib.XCloseDisplay)(display);
+                    return Some(WindowInfo {
+                        process_name: "LinuxApp".into(), // Full proc name lookup would be here
+                        title: title.into(),
+                    });
                 }
-
-                // 2. Get PID and Process Name
-                let pid_atom =
-                    (xlib.XInternAtom)(display, c"_NET_WM_PID".as_ptr() as *const i8, xlib::False);
-                let mut pid_prop = ptr::null_mut();
-                (xlib.XGetWindowProperty)(
-                    display,
-                    window_id,
-                    pid_atom,
-                    0,
-                    1,
-                    xlib::False,
-                    xlib::AnyPropertyType as u64,
-                    &mut actual_type,
-                    &mut actual_format,
-                    &mut nitems,
-                    &mut bytes_after,
-                    &mut pid_prop,
-                );
-
-                let mut process_name = "LinuxApp".to_string();
-                if !pid_prop.is_null() && nitems > 0 {
-                    let pid = *(pid_prop as *const u32);
-                    (xlib.XFree)(pid_prop as *mut _);
-
-                    if let Ok(comm) = fs::read_to_string(format!("/proc/{}/comm", pid)) {
-                        process_name = comm.trim().to_string();
-                    }
-                }
-
-                (xlib.XCloseDisplay)(display);
-                return Some(WindowInfo {
-                    process_name,
-                    title,
-                });
             }
 
             (xlib.XCloseDisplay)(display);
 
             Some(WindowInfo {
-                process_name: "LinuxApp".to_string(),
-                title: "Linux Window".to_string(),
+                process_name: "LinuxApp".into(),
+                title: "Linux Window".into(),
             })
         }
     }
