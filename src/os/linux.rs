@@ -134,12 +134,15 @@ impl OSInterface for LinuxOS {
 }
 
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
-pub fn detect_keyboard_device() -> Option<String> {
+pub fn detect_keyboard_devices() -> Vec<String> {
     use evdev::Device;
     use std::fs;
 
-    let mut internal_kbd = None;
-    let paths = fs::read_dir("/dev/input/").ok()?;
+    let mut keyboards = Vec::new();
+    let paths = match fs::read_dir("/dev/input/") {
+        Ok(paths) => paths,
+        Err(_) => return keyboards,
+    };
 
     for path in paths.flatten() {
         let path_str = path.path();
@@ -150,16 +153,9 @@ pub fn detect_keyboard_device() -> Option<String> {
                 .supported_keys()
                 .is_some_and(|keys| keys.contains(evdev::KeyCode::KEY_A))
             {
-                let name = device.name().unwrap_or("Unknown").to_lowercase();
-                let is_usb = name.contains("usb") || name.contains("external");
-
-                if is_usb {
-                    return Some(path_str.to_string_lossy().into_owned());
-                } else if internal_kbd.is_none() {
-                    internal_kbd = Some(path_str.to_string_lossy().into_owned());
-                }
+                keyboards.push(path_str.to_string_lossy().into_owned());
             }
         }
     }
-    internal_kbd
+    keyboards
 }

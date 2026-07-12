@@ -1,8 +1,11 @@
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
-use crate::os::linux::detect_keyboard_device;
+use crate::os::linux::detect_keyboard_devices;
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
 use evdev::Device;
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
+use std::collections::HashSet;
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
@@ -10,36 +13,60 @@ pub async fn start_evdev_collector(
     device_path: Option<String>,
     engine: std::sync::Arc<tokio::sync::RwLock<crate::engine::Engine<crate::os::linux::LinuxOS>>>,
 ) {
+    let active_devices = Arc::new(Mutex::new(HashSet::new()));
+
     loop {
-        let path = device_path.clone().or_else(detect_keyboard_device);
+        let mut paths = detect_keyboard_devices();
+        if let Some(ref path) = device_path {
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
 
-        if let Some(path) = path {
-            if let Ok(device) = Device::open(&path) {
-                if let Ok(mut event_stream) = device.into_event_stream() {
-                    println!(
-                        "Listening on device: {}",
-                        event_stream.device().name().unwrap_or("Unknown")
-                    );
+        for path in paths {
+            let mut active = active_devices.lock().unwrap();
+            if active.contains(&path) {
+                continue;
+            }
+            active.insert(path.clone());
+            drop(active);
 
-                    loop {
-                        match event_stream.next_event().await {
-                            Ok(event) => {
-                                if event.event_type() == evdev::EventType::KEY && event.value() == 1
-                                {
-                                    if let Some(key) = event_code_to_char(event.code()) {
-                                        let mut engine_lock = engine.write().await;
-                                        engine_lock.handle_key(key).await;
+            let engine_clone = Arc::clone(&engine);
+            let active_devices_clone = Arc::clone(&active_devices);
+            let path_clone = path.clone();
+
+            tokio::spawn(async move {
+                if let Ok(device) = Device::open(&path_clone) {
+                    if let Ok(mut event_stream) = device.into_event_stream() {
+                        println!(
+                            "Listening on device: {}",
+                            event_stream.device().name().unwrap_or("Unknown")
+                        );
+
+                        loop {
+                            match event_stream.next_event().await {
+                                Ok(event) => {
+                                    if event.event_type() == evdev::EventType::KEY
+                                        && event.value() == 1
+                                    {
+                                        if let Some(key) = event_code_to_char(event.code()) {
+                                            let mut engine_lock = engine_clone.write().await;
+                                            engine_lock.handle_key(key).await;
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                eprintln!("Device error: {}. Attempting re-scan...", e);
-                                break;
+                                Err(e) => {
+                                    eprintln!("Device error on {}: {}", path_clone, e);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
+                
+                let mut active = active_devices_clone.lock().unwrap();
+                active.remove(&path_clone);
+            });
         }
 
         tokio::time::sleep(Duration::from_secs(5)).await;
