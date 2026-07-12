@@ -13,6 +13,8 @@ pub enum Id {
     Dashboard,
     StatusBar,
     ExportModal,
+    SearchModal,
+    SyncModal,
 }
 
 pub fn setup_app() -> Model {
@@ -25,6 +27,8 @@ pub fn setup_app() -> Model {
     app.mount(Id::Dashboard, Box::new(DashboardComponent::new()), vec![]).expect("Failed to mount Dashboard");
     app.mount(Id::StatusBar, Box::new(StatusBar { is_idle: false }), vec![]).expect("Failed to mount StatusBar");
     app.mount(Id::ExportModal, Box::new(crate::ui::components::modals::ExportModal), vec![]).expect("Failed to mount ExportModal");
+    app.mount(Id::SearchModal, Box::new(crate::ui::components::modals::SearchModal::default()), vec![]).expect("Failed to mount SearchModal");
+    app.mount(Id::SyncModal, Box::new(crate::ui::components::modals::SyncModal), vec![]).expect("Failed to mount SyncModal");
 
     Model {
         app,

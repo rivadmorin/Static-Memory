@@ -512,6 +512,45 @@ pub fn start_storage_thread(
                                             }
                                         }
                                     }
+                                    StorageCommand::SearchHistory { keyword, sender } => {
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let mut history = Vec::new();
+                                        if let Ok(results) = db.search_logs(&keyword) {
+                                            for (ts_str, app, win, buf) in results {
+                                                let timestamp: DateTime<Utc> = DateTime::parse_from_rfc3339(&ts_str)
+                                                    .map(|dt| dt.with_timezone(&Utc))
+                                                    .unwrap_or_else(|_| Utc::now());
+                                                history.push(LogEntry {
+                                                    timestamp,
+                                                    app_name: smol_str::SmolStr::new(app),
+                                                    window_title: smol_str::SmolStr::new(win),
+                                                    buffer: smol_str::SmolStr::new(buf),
+                                                });
+                                            }
+                                        }
+                                        let _ = sender.blocking_send(history);
+                                    }
+                                    StorageCommand::SyncBackup { sender } => {
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let backup_path = format!("{}.remote_sync.bak", config.storage.db_path);
+                                        let backup_res = (|| -> rusqlite::Result<()> {
+                                            let mut dest = Connection::open(&backup_path)?;
+                                            let backup = rusqlite::backup::Backup::new(&db.conn, &mut dest)?;
+                                            backup.step(-1)?;
+                                            Ok(())
+                                        })();
+
+                                        match backup_res {
+                                            Ok(_) => { let _ = sender.blocking_send("Remote sync backup completed successfully.".to_string()); },
+                                            Err(e) => { let _ = sender.blocking_send(format!("Failed to sync backup: {}", e)); }
+                                        }
+                                    }
                                 }
                             }
                             None => {
