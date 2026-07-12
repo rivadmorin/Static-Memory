@@ -14,6 +14,12 @@ pub struct TimelineComponent {
     pub entries: Vec<LogEntry>,
 }
 
+impl Default for TimelineComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimelineComponent {
     pub fn new() -> Self {
         Self { entries: Vec::new() }
@@ -69,6 +75,8 @@ impl Component<crate::ui::app::Msg, crate::ui::app::Event> for TimelineComponent
                 tuirealm::event::Key::Char('q') => Some(crate::ui::app::Msg::AppClose),
                 tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Dashboard)),
                 tuirealm::event::Key::Char('e') if key_event.modifiers.contains(tuirealm::event::KeyModifiers::CONTROL) => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::ExportModal)),
+                tuirealm::event::Key::Char('s') if key_event.modifiers.contains(tuirealm::event::KeyModifiers::CONTROL) => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::SearchModal)),
+                tuirealm::event::Key::Char('b') if key_event.modifiers.contains(tuirealm::event::KeyModifiers::CONTROL) => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::SyncModal)),
                 _ => None,
             },
             _ => None,

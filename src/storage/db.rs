@@ -1,5 +1,4 @@
 use rusqlite::{params, Connection};
-use smol_str::SmolStr;
 use chrono::{DateTime, Utc};
 use crate::models::{LogEntry, Config};
 use crate::storage::{StorageCommand, AnalyticsData};
@@ -24,6 +23,8 @@ impl Database {
             PRAGMA cache_size = -2000;
             PRAGMA temp_store = MEMORY;
             PRAGMA mmap_size = 268435456;
+            PRAGMA busy_timeout = 5000;
+            PRAGMA wal_autocheckpoint = 1000;
         ",
         )?;
 
@@ -40,15 +41,16 @@ impl Database {
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON activity_log (timestamp)", [])?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log (app_name)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_app ON activity_log (timestamp, app_name)", [])?;
 
         Ok(Self { conn })
     }
 
     pub fn insert(&mut self, entry: &LogEntry) -> rusqlite::Result<()> {
         // Sanitize inputs to prevent corruption and handle edge cases
-        let app_name = entry.app_name.as_str().replace('\0', "").replace('\u{FFFD}', "");
-        let window_title = entry.window_title.as_str().replace('\0', "").replace('\u{FFFD}', "");
-        let buffer = entry.buffer.replace('\0', "").replace('\u{FFFD}', "");
+        let app_name = entry.app_name.as_str().replace(['\0', '\u{FFFD}'], "");
+        let window_title = entry.window_title.as_str().replace(['\0', '\u{FFFD}'], "");
+        let buffer = entry.buffer.replace(['\0', '\u{FFFD}'], "");
 
         // Enforce length limits for schema validation
         let app_name = if app_name.len() > 256 {
@@ -87,7 +89,7 @@ impl Database {
         }
         let tx = self.conn.transaction()?;
         {
-            let mut stmt = tx.prepare(
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO activity_log (timestamp, app_name, window_title, buffer) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for entry in entries {
@@ -446,10 +448,14 @@ pub fn start_storage_thread(
                         if !buffer.is_empty() {
                             if let Err(e) = db.insert_batch(&buffer) {
                                 eprintln!("Database insert_batch error: {}", e);
-                            }
-                            buffer.clear();
-                            if db.check_rotation(&config) {
-                                enforce_retention(&config);
+                                if buffer.len() >= 1000 {
+                                    buffer.clear();
+                                }
+                            } else {
+                                buffer.clear();
+                                if db.check_rotation(&config) {
+                                    enforce_retention(&config);
+                                }
                             }
                         }
                     }
@@ -462,16 +468,22 @@ pub fn start_storage_thread(
                                         if buffer.len() >= 50 {
                                             if let Err(e) = db.insert_batch(&buffer) {
                                                 eprintln!("Database insert_batch error: {}", e);
-                                            }
-                                            buffer.clear();
-                                            if db.check_rotation(&config) {
-                                                enforce_retention(&config);
+                                                if buffer.len() >= 1000 {
+                                                    buffer.clear();
+                                                }
+                                            } else {
+                                                buffer.clear();
+                                                if db.check_rotation(&config) {
+                                                    enforce_retention(&config);
+                                                }
                                             }
                                         }
                                     }
                                     StorageCommand::GetAnalytics { sender } => {
                                         if !buffer.is_empty() {
-                                            let _ = db.insert_batch(&buffer);
+                                            if let Err(e) = db.insert_batch(&buffer) {
+                                                eprintln!("Database insert_batch error: {}", e);
+                                            }
                                             buffer.clear();
                                         }
                                         let top_apps = db.get_top_apps().unwrap_or_default();
@@ -481,7 +493,9 @@ pub fn start_storage_thread(
                                     }
                                     StorageCommand::Export { start, end, format, sender } => {
                                         if !buffer.is_empty() {
-                                            let _ = db.insert_batch(&buffer);
+                                            if let Err(e) = db.insert_batch(&buffer) {
+                                                eprintln!("Database insert_batch error: {}", e);
+                                            }
                                             buffer.clear();
                                         }
                                         let data = db.export_data(start, end, &format).unwrap_or_else(|e| format!("Export error: {}", e));
@@ -489,7 +503,9 @@ pub fn start_storage_thread(
                                     }
                                     StorageCommand::QueryHistory { sender } => {
                                         if !buffer.is_empty() {
-                                            let _ = db.insert_batch(&buffer);
+                                            if let Err(e) = db.insert_batch(&buffer) {
+                                                eprintln!("Database insert_batch error: {}", e);
+                                            }
                                             buffer.clear();
                                         }
                                         if let Ok(mut stmt) = db.conn.prepare("SELECT timestamp, app_name, window_title, buffer FROM activity_log ORDER BY timestamp DESC LIMIT 50") {
@@ -512,12 +528,53 @@ pub fn start_storage_thread(
                                             }
                                         }
                                     }
+                                    StorageCommand::SearchHistory { keyword, sender } => {
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let mut history = Vec::new();
+                                        if let Ok(results) = db.search_logs(&keyword) {
+                                            for (ts_str, app, win, buf) in results {
+                                                let timestamp: DateTime<Utc> = DateTime::parse_from_rfc3339(&ts_str)
+                                                    .map(|dt| dt.with_timezone(&Utc))
+                                                    .unwrap_or_else(|_| Utc::now());
+                                                history.push(LogEntry {
+                                                    timestamp,
+                                                    app_name: smol_str::SmolStr::new(app),
+                                                    window_title: smol_str::SmolStr::new(win),
+                                                    buffer: smol_str::SmolStr::new(buf),
+                                                });
+                                            }
+                                        }
+                                        let _ = sender.blocking_send(history);
+                                    }
+                                    StorageCommand::SyncBackup { sender } => {
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let backup_path = format!("{}.remote_sync.bak", config.storage.db_path);
+                                        let backup_res = (|| -> rusqlite::Result<()> {
+                                            let mut dest = Connection::open(&backup_path)?;
+                                            let backup = rusqlite::backup::Backup::new(&db.conn, &mut dest)?;
+                                            backup.step(-1)?;
+                                            Ok(())
+                                        })();
+                                        
+                                        match backup_res {
+                                            Ok(_) => { let _ = sender.blocking_send("Remote sync backup completed successfully.".to_string()); },
+                                            Err(e) => { let _ = sender.blocking_send(format!("Failed to sync backup: {}", e)); }
+                                        }
+                                    }
                                 }
                             }
                             None => {
                                 // Channel closed, flush remaining and exit
                                 if !buffer.is_empty() {
-                                    let _ = db.insert_batch(&buffer);
+                                    if let Err(e) = db.insert_batch(&buffer) {
+                                        eprintln!("Database insert_batch error: {}", e);
+                                    }
                                 }
                                 break;
                             }

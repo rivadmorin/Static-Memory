@@ -10,6 +10,8 @@ pub mod ui;
 use crate::os::windows::WindowsOS;
 #[cfg(target_os = "linux")]
 use crate::os::linux::LinuxOS;
+#[cfg(target_os = "macos")]
+use crate::os::macos::MacOS;
 use chrono::Utc;
 use crate::models::{Config, ConfigFile};
 use crate::storage::db::start_storage_thread;
@@ -17,7 +19,7 @@ use crate::engine::Engine;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tracing::{error, info};
+use tracing::{error, info, Instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 use std::fs;
@@ -360,7 +362,9 @@ error!("\n\rDaemon crashed: {:?}", panic_info);
     let os = WindowsOS;
     #[cfg(target_os = "linux")]
     let os = LinuxOS;
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    let os = MacOS;
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     panic!("Unsupported OS");
 
     let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(config.clone(), os, storage_tx.clone())));
@@ -388,6 +392,14 @@ error!("\n\rDaemon crashed: {:?}", panic_info);
         });
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        let engine_clone = Arc::clone(&engine);
+        tokio::spawn(async move {
+            crate::collector::keyboard::start_macos_collector(engine_clone).await;
+        });
+    }
+
     // Idle check loop
     let engine_clone = Arc::clone(&engine);
     tokio::spawn(async move {
@@ -405,62 +417,86 @@ info!("Static-Memory Daemon started.");
     let engine_ipc = Arc::clone(&engine);
     let storage_ipc = storage_tx.clone();
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     tokio::spawn(async move {
-        if let Ok(listener) = crate::os::ipc::linux::listen().await {
+        if let Ok(listener) = crate::os::ipc::unix_ipc::listen().await {
             while let Ok((mut stream, _)) = listener.accept().await {
                 let storage = storage_ipc.clone();
                 let engine_conn = Arc::clone(&engine_ipc);
                 tokio::spawn(async move {
                     while let Ok(msg) = crate::os::ipc::receive_message(&mut stream).await {
+                        let correlation_id = uuid::Uuid::new_v4().to_string();
+                        let span = tracing::info_span!("ipc_request", correlation_id = %correlation_id);
+                        
                         use crate::models::{IPCMessage, IPCResponse};
-                        let response = match msg {
-                            IPCMessage::GetAnalytics => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
-                                if let Some(data) = rx.recv().await {
-                                    IPCResponse::Analytics(data)
-                                } else {
-                                    IPCResponse::Error("Failed to get analytics".into())
+                        
+                        let response = async {
+                            match msg {
+                                IPCMessage::GetAnalytics => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
+                                    if let Some(data) = rx.recv().await {
+                                        IPCResponse::Analytics(data)
+                                    } else {
+                                        IPCResponse::Error("Failed to get analytics".into())
+                                    }
                                 }
-                            }
-                            IPCMessage::ExportData { start, end, format } => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let fmt_clone = format.clone();
-                                let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
-                                if let Some(data) = rx.recv().await {
-                                    let data_dir = crate::os::get_data_dir();
-                                    let export_dir = data_dir.join("exports");
-                                    let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
-                                    let _ = std::fs::create_dir_all(&export_dir);
-                                    if std::fs::write(&filename, data).is_ok() {
+                                IPCMessage::ExportData { start, end, format } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let fmt_clone = format.clone();
+                                    let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
+                                    if let Some(data) = rx.recv().await {
+                                        let data_dir = crate::os::get_data_dir();
+                                        let export_dir = data_dir.join("exports");
+                                        let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
+                                        let _ = std::fs::create_dir_all(&export_dir);
+                                        if std::fs::write(&filename, data).is_ok() {
+                                            IPCResponse::Ok
+                                        } else {
+                                            IPCResponse::Error("Failed to write export file".into())
+                                        }
+                                    } else {
+                                        IPCResponse::Error("Export failed".into())
+                                    }
+                                }
+                                IPCMessage::GetTimeline { limit: _ } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
+                                    if let Some(history) = rx.recv().await {
+                                        IPCResponse::Timeline(history)
+                                    } else {
+                                        IPCResponse::Error("Failed to get timeline".into())
+                                    }
+                                }
+                                IPCMessage::SearchHistory { keyword } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::SearchHistory { keyword, sender: tx }).await;
+                                    if let Some(history) = rx.recv().await {
+                                        IPCResponse::Timeline(history)
+                                    } else {
+                                        IPCResponse::Error("Failed to search history".into())
+                                    }
+                                }
+                                IPCMessage::SyncBackup => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::SyncBackup { sender: tx }).await;
+                                    if let Some(_) = rx.recv().await {
                                         IPCResponse::Ok
                                     } else {
-                                        IPCResponse::Error("Failed to write export file".into())
+                                        IPCResponse::Error("Sync failed".into())
                                     }
-                                } else {
-                                    IPCResponse::Error("Export failed".into())
                                 }
-                            }
-                            IPCMessage::GetTimeline { limit: _ } => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
-                                if let Some(history) = rx.recv().await {
-                                    IPCResponse::Timeline(history)
-                                } else {
-                                    IPCResponse::Error("Failed to get timeline".into())
+                                IPCMessage::Shutdown => {
+                                    let _ = crate::os::ipc::send_response(&mut stream, &IPCResponse::Ok).await;
+                                    std::process::exit(0);
                                 }
+                                IPCMessage::GetStatus => {
+                                    let engine_lock = engine_conn.read().await;
+                                    IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
+                                }
+                                _ => IPCResponse::Error("Not implemented".into()),
                             }
-                            IPCMessage::Shutdown => {
-                                let _ = crate::os::ipc::send_response(&mut stream, &IPCResponse::Ok).await;
-                                std::process::exit(0);
-                            }
-                            IPCMessage::GetStatus => {
-                                let engine_lock = engine_conn.read().await;
-                                IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
-                            }
-                            _ => IPCResponse::Error("Not implemented".into()),
-                        };
+                        }.instrument(span).await;
                         let _ = crate::os::ipc::send_response(&mut stream, &response).await;
                     }
                 });
@@ -476,54 +512,78 @@ info!("Static-Memory Daemon started.");
                 let engine_conn = Arc::clone(&engine_ipc);
                 tokio::spawn(async move {
                     while let Ok(msg) = crate::os::ipc::receive_message(&mut server).await {
+                        let correlation_id = uuid::Uuid::new_v4().to_string();
+                        let span = tracing::info_span!("ipc_request", correlation_id = %correlation_id);
+                        
                         use crate::models::{IPCMessage, IPCResponse};
-                        let response = match msg {
-                            IPCMessage::GetAnalytics => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
-                                if let Some(data) = rx.recv().await {
-                                    IPCResponse::Analytics(data)
-                                } else {
-                                    IPCResponse::Error("Failed to get analytics".into())
+                        
+                        let response = async {
+                            match msg {
+                                IPCMessage::GetAnalytics => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
+                                    if let Some(data) = rx.recv().await {
+                                        IPCResponse::Analytics(data)
+                                    } else {
+                                        IPCResponse::Error("Failed to get analytics".into())
+                                    }
                                 }
-                            }
-                            IPCMessage::ExportData { start, end, format } => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let fmt_clone = format.clone();
-                                let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
-                                if let Some(data) = rx.recv().await {
-                                    let data_dir = crate::os::get_data_dir();
-                                    let export_dir = data_dir.join("exports");
-                                    let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
-                                    let _ = std::fs::create_dir_all(&export_dir);
-                                    if std::fs::write(&filename, data).is_ok() {
+                                IPCMessage::ExportData { start, end, format } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let fmt_clone = format.clone();
+                                    let _ = storage.send(crate::storage::StorageCommand::Export { start, end, format, sender: tx }).await;
+                                    if let Some(data) = rx.recv().await {
+                                        let data_dir = crate::os::get_data_dir();
+                                        let export_dir = data_dir.join("exports");
+                                        let filename = export_dir.join(format!("export_{}.{}", Utc::now().timestamp(), fmt_clone));
+                                        let _ = std::fs::create_dir_all(&export_dir);
+                                        if std::fs::write(&filename, data).is_ok() {
+                                            IPCResponse::Ok
+                                        } else {
+                                            IPCResponse::Error("Failed to write export file".into())
+                                        }
+                                    } else {
+                                        IPCResponse::Error("Export failed".into())
+                                    }
+                                }
+                                IPCMessage::GetTimeline { limit: _ } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
+                                    if let Some(history) = rx.recv().await {
+                                        IPCResponse::Timeline(history)
+                                    } else {
+                                        IPCResponse::Error("Failed to get timeline".into())
+                                    }
+                                }
+                                IPCMessage::SearchHistory { keyword } => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::SearchHistory { keyword, sender: tx }).await;
+                                    if let Some(history) = rx.recv().await {
+                                        IPCResponse::Timeline(history)
+                                    } else {
+                                        IPCResponse::Error("Failed to search history".into())
+                                    }
+                                }
+                                IPCMessage::SyncBackup => {
+                                    let (tx, mut rx) = mpsc::channel(1);
+                                    let _ = storage.send(crate::storage::StorageCommand::SyncBackup { sender: tx }).await;
+                                    if let Some(_) = rx.recv().await {
                                         IPCResponse::Ok
                                     } else {
-                                        IPCResponse::Error("Failed to write export file".into())
+                                        IPCResponse::Error("Sync failed".into())
                                     }
-                                } else {
-                                    IPCResponse::Error("Export failed".into())
                                 }
-                            }
-                            IPCMessage::GetTimeline { limit: _ } => {
-                                let (tx, mut rx) = mpsc::channel(1);
-                                let _ = storage.send(crate::storage::StorageCommand::QueryHistory { sender: tx }).await;
-                                if let Some(history) = rx.recv().await {
-                                    IPCResponse::Timeline(history)
-                                } else {
-                                    IPCResponse::Error("Failed to get timeline".into())
+                                IPCMessage::Shutdown => {
+                                    let _ = crate::os::ipc::send_response(&mut server, &IPCResponse::Ok).await;
+                                    std::process::exit(0);
                                 }
+                                IPCMessage::GetStatus => {
+                                    let engine_lock = engine_conn.read().await;
+                                    IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
+                                }
+                                _ => IPCResponse::Error("Not implemented".into()),
                             }
-                            IPCMessage::Shutdown => {
-                                let _ = crate::os::ipc::send_response(&mut server, &IPCResponse::Ok).await;
-                                std::process::exit(0);
-                            }
-                            IPCMessage::GetStatus => {
-                                let engine_lock = engine_conn.read().await;
-                                IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
-                            }
-                            _ => IPCResponse::Error("Not implemented".into()),
-                        };
+                        }.instrument(span).await;
                         let _ = crate::os::ipc::send_response(&mut server, &response).await;
                     }
                 });
@@ -562,18 +622,48 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                 while !model.quit && !connection_lost {
                     if let Ok(events) = model.app.tick(tuirealm::PollStrategy::Once) {
                         for event in events {
-                            if let Some(crate::ui::app::Msg::ExportExecuted(fmt)) = model.update(Some(event)) {
-                                let now = Utc::now();
-                                let start = now - chrono::Duration::days(7);
-                                if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::ExportData { start, end: now, format: fmt }).await {
-                                    connection_lost = true;
-                                    break;
+                            match model.update(Some(event)) {
+                                Some(crate::ui::app::Msg::ExportExecuted(fmt)) => {
+                                    let now = Utc::now();
+                                    let start = now - chrono::Duration::days(7);
+                                    if crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::ExportData { start, end: now, format: fmt }).await.is_err() {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    if crate::os::ipc::receive_response(&mut stream).await.is_err() {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
                                 }
-                                if let Err(_) = crate::os::ipc::receive_response(&mut stream).await {
-                                    connection_lost = true;
-                                    break;
+                                Some(crate::ui::app::Msg::SearchExecuted(term)) => {
+                                    if crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::SearchHistory { keyword: term }).await.is_err() {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    match crate::os::ipc::receive_response(&mut stream).await {
+                                        Ok(crate::models::IPCResponse::Timeline(history)) => {
+                                            model.update(Some(crate::ui::app::Msg::UpdateTimeline(history)));
+                                        }
+                                        _ => {
+                                            connection_lost = true;
+                                            break;
+                                        }
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
                                 }
-                                model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
+                                Some(crate::ui::app::Msg::SyncBackupExecuted) => {
+                                    if crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::SyncBackup).await.is_err() {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    if crate::os::ipc::receive_response(&mut stream).await.is_err() {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -588,7 +678,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                     if force_sync || now.duration_since(last_sync) >= Duration::from_secs(2) {
                         // Sync State
                         if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetStatus).await {
-                            connection_lost = true;
+                            
                             break;
                         }
                         match crate::os::ipc::receive_response(&mut stream).await {
@@ -597,7 +687,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Ok(_) => {}
                             Err(_) => {
-                                connection_lost = true;
+                                
                                 break;
                             }
                         }
@@ -605,7 +695,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                         // Request data from daemon
                         if model.active_tab == crate::ui::Id::Timeline {
                             if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetTimeline { limit: 50 }).await {
-                                connection_lost = true;
+                                
                                 break;
                             }
                             match crate::os::ipc::receive_response(&mut stream).await {
@@ -614,13 +704,13 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 Ok(_) => {}
                                 Err(_) => {
-                                    connection_lost = true;
+                                    
                                     break;
                                 }
                             }
                         } else if model.active_tab == crate::ui::Id::Dashboard {
                             if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::GetAnalytics).await {
-                                connection_lost = true;
+                                
                                 break;
                             }
                             match crate::os::ipc::receive_response(&mut stream).await {
@@ -629,7 +719,7 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 Ok(_) => {}
                                 Err(_) => {
-                                    connection_lost = true;
+                                    
                                     break;
                                 }
                             }

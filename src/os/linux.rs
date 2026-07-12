@@ -2,8 +2,6 @@ use crate::os::{OSInterface, WindowInfo};
 #[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ffi::CStr;
 #[cfg(all(target_os = "linux", feature = "x11"))]
-use std::fs;
-#[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ptr;
 #[cfg(all(target_os = "linux", feature = "x11"))]
 use x11_dl::xlib;

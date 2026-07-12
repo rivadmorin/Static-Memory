@@ -9,6 +9,12 @@ pub struct DashboardComponent {
     pub data: Option<AnalyticsData>,
 }
 
+impl Default for DashboardComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DashboardComponent {
     pub fn new() -> Self {
         Self { data: None }

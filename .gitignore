@@ -1,1 +1,4 @@
 /target
+test_*.db*
+.jules-companion/
+

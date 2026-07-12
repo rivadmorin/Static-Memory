@@ -46,6 +46,7 @@ async fn test_window_filtering() {
     // Test excluded window (by title)
     mock_os.set_window("chrome.exe", "Private Browsing");
 
+    engine.check_window_switch().await;
     engine.handle_key('a').await;
     engine.handle_key('b').await;
     engine.handle_key('c').await;
@@ -60,6 +61,7 @@ async fn test_window_filtering() {
     // Test excluded window (by process)
     mock_os.set_window("bitwarden.exe", "Bitwarden Password Manager");
 
+    engine.check_window_switch().await;
     engine.handle_key('1').await;
     engine.handle_key('2').await;
 
@@ -73,6 +75,7 @@ async fn test_window_filtering() {
     // Test allowed window
     mock_os.set_window("code.exe", "project - Visual Studio Code");
 
+    engine.check_window_switch().await;
     engine.handle_key('h').await;
     engine.handle_key('e').await;
     engine.handle_key('l').await;
@@ -100,11 +103,13 @@ async fn test_window_switch_flush() {
     let mut engine = Engine::new(config.clone(), mock_os.clone(), storage_tx);
 
     mock_os.set_window("app1.exe", "Window 1");
+    engine.check_window_switch().await;
     engine.handle_key('a').await;
     engine.handle_key('b').await;
 
     // Changing window should cause immediate flush
     mock_os.set_window("app2.exe", "Window 2");
+    engine.check_window_switch().await;
 
     engine.handle_key('c').await; // this triggers check_window_switch
 
@@ -191,4 +196,68 @@ async fn test_ipc_crash_resilience() {
             .handle_key(char::from_digit(i % 10, 10).unwrap())
             .await;
     }
+}
+
+use static_memory::os::ipc::{send_message, receive_message, send_response, receive_response};
+use static_memory::models::{IPCMessage, IPCResponse};
+use tokio::io::duplex;
+
+#[tokio::test]
+async fn test_ipc_stream_boundaries() {
+    let (mut client, mut server) = duplex(1024);
+
+    let msg1 = IPCMessage::GetStatus;
+    let msg2 = IPCMessage::GetTimeline { limit: 10 };
+    
+    // Client sends two messages quickly (testing stream boundaries)
+    send_message(&mut client, &msg1).await.unwrap();
+    send_message(&mut client, &msg2).await.unwrap();
+
+    // Server reads first
+    let received1 = receive_message(&mut server).await.unwrap();
+    assert_eq!(received1, msg1);
+
+    // Server reads second
+    let received2 = receive_message(&mut server).await.unwrap();
+    assert_eq!(received2, msg2);
+}
+
+#[tokio::test]
+async fn test_ipc_daemon_recovery_on_disconnect() {
+    let (mut client, mut server) = duplex(1024);
+
+    let msg = IPCMessage::GetStatus;
+    send_message(&mut client, &msg).await.unwrap();
+    
+    // Drop client
+    drop(client);
+    
+    let received = receive_message(&mut server).await.unwrap();
+    assert_eq!(received, msg);
+    
+    // Next read should fail because client disconnected
+    let result = receive_message(&mut server).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_ipc_socket_boundaries_large_payload() {
+    // 64 byte buffer to force fragmentation
+    let (mut client, mut server) = duplex(64);
+    
+    let large_buffer: String = "A".repeat(1000);
+    let msg = IPCResponse::Error(large_buffer.clone());
+    
+    let handle = tokio::spawn(async move {
+        send_response(&mut server, &msg).await.unwrap();
+    });
+    
+    let received = receive_response(&mut client).await.unwrap();
+    if let IPCResponse::Error(received_str) = received {
+        assert_eq!(received_str, large_buffer);
+    } else {
+        panic!("Wrong response type");
+    }
+    
+    handle.await.unwrap();
 }

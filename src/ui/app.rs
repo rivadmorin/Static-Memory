@@ -22,6 +22,8 @@ pub enum Msg {
     UpdateAnalytics(crate::storage::AnalyticsData),
     UpdateTimeline(Vec<crate::models::LogEntry>),
     ExportExecuted(String),
+    SearchExecuted(String),
+    SyncBackupExecuted,
     SetIdle(bool),
 }
 
@@ -44,6 +46,18 @@ impl Model {
             match self.active_tab {
                 Id::Timeline => self.app.view(&Id::Timeline, f, chunks[0]),
                 Id::Dashboard => self.app.view(&Id::Dashboard, f, chunks[0]),
+                Id::ExportModal => {
+                    self.app.view(&Id::Timeline, f, chunks[0]);
+                    self.app.view(&Id::ExportModal, f, chunks[0]);
+                }
+                Id::SearchModal => {
+                    self.app.view(&Id::Timeline, f, chunks[0]);
+                    self.app.view(&Id::SearchModal, f, chunks[0]);
+                }
+                Id::SyncModal => {
+                    self.app.view(&Id::Timeline, f, chunks[0]);
+                    self.app.view(&Id::SyncModal, f, chunks[0]);
+                }
                 _ => {}
             }
 
