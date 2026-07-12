@@ -46,6 +46,7 @@ async fn test_window_filtering() {
     // Test excluded window (by title)
     mock_os.set_window("chrome.exe", "Private Browsing");
 
+    engine.check_window_switch().await;
     engine.handle_key('a').await;
     engine.handle_key('b').await;
     engine.handle_key('c').await;
@@ -60,6 +61,7 @@ async fn test_window_filtering() {
     // Test excluded window (by process)
     mock_os.set_window("bitwarden.exe", "Bitwarden Password Manager");
 
+    engine.check_window_switch().await;
     engine.handle_key('1').await;
     engine.handle_key('2').await;
 
@@ -73,6 +75,7 @@ async fn test_window_filtering() {
     // Test allowed window
     mock_os.set_window("code.exe", "project - Visual Studio Code");
 
+    engine.check_window_switch().await;
     engine.handle_key('h').await;
     engine.handle_key('e').await;
     engine.handle_key('l').await;
@@ -100,11 +103,13 @@ async fn test_window_switch_flush() {
     let mut engine = Engine::new(config.clone(), mock_os.clone(), storage_tx);
 
     mock_os.set_window("app1.exe", "Window 1");
+    engine.check_window_switch().await;
     engine.handle_key('a').await;
     engine.handle_key('b').await;
 
     // Changing window should cause immediate flush
     mock_os.set_window("app2.exe", "Window 2");
+    engine.check_window_switch().await;
 
     engine.handle_key('c').await; // this triggers check_window_switch
 
