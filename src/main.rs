@@ -17,7 +17,7 @@ use crate::engine::Engine;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tracing::{error, info};
+use tracing::{error, info, Instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 use std::fs;
@@ -342,7 +342,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Terminal safety (even in daemon, for logs/panic)
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = crossterm::terminal::disable_raw_mode();
-error!("\n\rDaemon crashed: {:?}", panic_info);
+        tracing::error!(panic_info = ?panic_info, "Daemon crashed");
         eprintln!("\n\rDaemon crashed: {:?}", panic_info);
     }));
 
@@ -413,8 +413,13 @@ info!("Static-Memory Daemon started.");
                 let engine_conn = Arc::clone(&engine_ipc);
                 tokio::spawn(async move {
                     while let Ok(msg) = crate::os::ipc::receive_message(&mut stream).await {
+                        let correlation_id = uuid::Uuid::new_v4().to_string();
+                        let span = tracing::info_span!("ipc_request", correlation_id = %correlation_id);
+
                         use crate::models::{IPCMessage, IPCResponse};
-                        let response = match msg {
+
+                        let response = async {
+                            match msg {
                             IPCMessage::GetAnalytics => {
                                 let (tx, mut rx) = mpsc::channel(1);
                                 let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
@@ -460,7 +465,8 @@ info!("Static-Memory Daemon started.");
                                 IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
                             }
                             _ => IPCResponse::Error("Not implemented".into()),
-                        };
+                            }
+                        }.instrument(span).await;
                         let _ = crate::os::ipc::send_response(&mut stream, &response).await;
                     }
                 });
@@ -476,8 +482,13 @@ info!("Static-Memory Daemon started.");
                 let engine_conn = Arc::clone(&engine_ipc);
                 tokio::spawn(async move {
                     while let Ok(msg) = crate::os::ipc::receive_message(&mut server).await {
+                        let correlation_id = uuid::Uuid::new_v4().to_string();
+                        let span = tracing::info_span!("ipc_request", correlation_id = %correlation_id);
+
                         use crate::models::{IPCMessage, IPCResponse};
-                        let response = match msg {
+
+                        let response = async {
+                            match msg {
                             IPCMessage::GetAnalytics => {
                                 let (tx, mut rx) = mpsc::channel(1);
                                 let _ = storage.send(crate::storage::StorageCommand::GetAnalytics { sender: tx }).await;
@@ -523,7 +534,8 @@ info!("Static-Memory Daemon started.");
                                 IPCResponse::Status { is_paused: false, is_idle: engine_lock.is_idle() }
                             }
                             _ => IPCResponse::Error("Not implemented".into()),
-                        };
+                            }
+                        }.instrument(span).await;
                         let _ = crate::os::ipc::send_response(&mut server, &response).await;
                     }
                 });
@@ -649,10 +661,12 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 
                 // If connection was lost, print status message and loop back to reconnect
+                tracing::warn!("Lost connection to daemon. Reconnecting in 2 seconds...");
                 println!("Lost connection to daemon. Reconnecting in 2 seconds...");
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
             Err(e) => {
+                tracing::error!(error = %e, "Failed to connect to daemon. Retrying...");
                 eprintln!("Failed to connect to daemon: {}. Retrying...", e);
             }
         }

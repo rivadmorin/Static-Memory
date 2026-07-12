@@ -8,6 +8,23 @@ use crate::engine::buffer::TextBuffer;
 use tokio::sync::mpsc;
 use chrono::{Utc, DateTime};
 use smol_str::SmolStr;
+use std::sync::OnceLock;
+
+static CC_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+static PWD_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+
+pub fn redact_sensitive_data(buffer: &str) -> String {
+    let mut redacted = buffer.to_string();
+    // Redact credit card patterns (13-16 digits with optional spaces/dashes)
+    let cc_regex = CC_REGEX.get_or_init(|| regex::Regex::new(r"\b(?:\d[ -]*?){13,16}\b").unwrap());
+    redacted = cc_regex.replace_all(&redacted, "[REDACTED_CARD]").into_owned();
+
+    // Simple mock pattern for passwords (e.g. after 'password=' or 'pwd=')
+    let pwd_regex = PWD_REGEX.get_or_init(|| regex::Regex::new(r"(?i)(password|pwd|token)\s*[:=]\s*\S+").unwrap());
+    redacted = pwd_regex.replace_all(&redacted, "$1=[REDACTED]").into_owned();
+
+    redacted
+}
 
 pub struct Engine<O: OSInterface> {
     config: Config,
@@ -90,6 +107,15 @@ impl<O: OSInterface> Engine<O> {
 
     async fn log_event(&self, message: String) {
         if let Some(window) = &self.current_window {
+            let redacted_message = redact_sensitive_data(&message);
+
+            tracing::info!(
+                app_name = %window.process_name,
+                window_title = %window.title,
+                buffer_length = redacted_message.len(),
+                "Flushing text buffer to storage"
+            );
+
             let entry = LogEntry {
                 timestamp: Utc::now(),
                 app_name: window.process_name.clone(),
@@ -119,11 +145,21 @@ impl<O: OSInterface> Engine<O> {
     pub async fn flush(&mut self) {
         if !self.buffer.is_empty() {
             if let Some(window) = &self.current_window {
+                let raw_string = self.buffer.get_string();
+                let redacted_string = redact_sensitive_data(&raw_string);
+
+                tracing::info!(
+                    app_name = %window.process_name,
+                    window_title = %window.title,
+                    buffer_length = redacted_string.len(),
+                    "Flushing text buffer to storage"
+                );
+
                 let entry = LogEntry {
                     timestamp: Utc::now(),
                     app_name: window.process_name.clone(),
                     window_title: window.title.clone(),
-                    buffer: SmolStr::new(self.buffer.get_string()),
+                    buffer: SmolStr::new(raw_string),
                 };
                 let _ = self.storage_tx.send(StorageCommand::Store(entry)).await;
             }
