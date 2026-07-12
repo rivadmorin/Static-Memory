@@ -21,6 +21,8 @@ pub enum IPCMessage {
     Pause,
     Resume,
     Shutdown,
+    SearchHistory { keyword: String },
+    SyncBackup,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

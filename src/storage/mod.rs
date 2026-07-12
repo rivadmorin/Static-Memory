@@ -9,6 +9,8 @@ pub enum StorageCommand {
     QueryHistory { sender: mpsc::Sender<Vec<LogEntry>> },
     GetAnalytics { sender: mpsc::Sender<AnalyticsData> },
     Export { start: chrono::DateTime<chrono::Utc>, end: chrono::DateTime<chrono::Utc>, format: String, sender: mpsc::Sender<String> },
+    SearchHistory { keyword: String, sender: mpsc::Sender<Vec<LogEntry>> },
+    SyncBackup { sender: mpsc::Sender<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

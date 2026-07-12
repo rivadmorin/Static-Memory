@@ -12,7 +12,7 @@ impl MockComponent for ExportModal {
         let area = centered_rect(60, 20, area);
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new("Export Data (Ctrl+E)\n\nFormat: CSV / TXT\n\n[Press Enter to Export, Esc to Cancel]")
+            Paragraph::new("Export Data (Ctrl+E)\n\nPress 'c' for CSV\nPress 't' for TXT\nPress 'j' for JSON\n\n[Esc to Cancel]")
                 .block(Block::default().borders(Borders::ALL).title("Data Export"))
                 .alignment(Alignment::Center),
             area,
@@ -28,7 +28,88 @@ impl Component<crate::ui::app::Msg, crate::ui::app::Event> for ExportModal {
         match ev {
             Event::Keyboard(key) => match key.code {
                 tuirealm::event::Key::Esc => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
-                tuirealm::event::Key::Enter => Some(crate::ui::app::Msg::ExportExecuted("csv".into())),
+                tuirealm::event::Key::Char('c') => Some(crate::ui::app::Msg::ExportExecuted("csv".into())),
+                tuirealm::event::Key::Char('t') => Some(crate::ui::app::Msg::ExportExecuted("txt".into())),
+                tuirealm::event::Key::Char('j') => Some(crate::ui::app::Msg::ExportExecuted("json".into())),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct SearchModal {
+    pub input: String,
+}
+
+impl MockComponent for SearchModal {
+    fn perform(&mut self, _cmd: Cmd) -> CmdResult { CmdResult::None }
+    fn view(&mut self, frame: &mut tuirealm::Frame, area: Rect) {
+        let area = centered_rect(60, 20, area);
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(format!("Search Term:\n\n{}\n\n[Press Enter to Search, Esc to Cancel]", self.input))
+                .block(Block::default().borders(Borders::ALL).title("Search History (Ctrl+S)"))
+                .alignment(Alignment::Center),
+            area,
+        );
+    }
+    fn query(&self, _attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> { None }
+    fn attr(&mut self, _attr: tuirealm::Attribute, _value: tuirealm::AttrValue) {}
+    fn state(&self) -> State { State::None }
+}
+
+impl Component<crate::ui::app::Msg, crate::ui::app::Event> for SearchModal {
+    fn on(&mut self, ev: Event<crate::ui::app::Event>) -> Option<crate::ui::app::Msg> {
+        match ev {
+            Event::Keyboard(key) => match key.code {
+                tuirealm::event::Key::Esc => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
+                tuirealm::event::Key::Enter => {
+                    let term = self.input.clone();
+                    self.input.clear();
+                    Some(crate::ui::app::Msg::SearchExecuted(term))
+                },
+                tuirealm::event::Key::Backspace => {
+                    self.input.pop();
+                    None
+                }
+                tuirealm::event::Key::Char(c) => {
+                    self.input.push(c);
+                    None
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+pub struct SyncModal;
+
+impl MockComponent for SyncModal {
+    fn perform(&mut self, _cmd: Cmd) -> CmdResult { CmdResult::None }
+    fn view(&mut self, frame: &mut tuirealm::Frame, area: Rect) {
+        let area = centered_rect(60, 20, area);
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new("Sync Backup to Remote (Ctrl+B)\n\nAre you sure you want to trigger a remote sync?\n\n[Press Enter to Sync, Esc to Cancel]")
+                .block(Block::default().borders(Borders::ALL).title("Sync Backup"))
+                .alignment(Alignment::Center),
+            area,
+        );
+    }
+    fn query(&self, _attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> { None }
+    fn attr(&mut self, _attr: tuirealm::Attribute, _value: tuirealm::AttrValue) {}
+    fn state(&self) -> State { State::None }
+}
+
+impl Component<crate::ui::app::Msg, crate::ui::app::Event> for SyncModal {
+    fn on(&mut self, ev: Event<crate::ui::app::Event>) -> Option<crate::ui::app::Msg> {
+        match ev {
+            Event::Keyboard(key) => match key.code {
+                tuirealm::event::Key::Esc => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
+                tuirealm::event::Key::Enter => Some(crate::ui::app::Msg::SyncBackupExecuted),
                 _ => None,
             },
             _ => None,

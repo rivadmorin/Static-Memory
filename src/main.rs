@@ -451,6 +451,24 @@ info!("Static-Memory Daemon started.");
                                     IPCResponse::Error("Failed to get timeline".into())
                                 }
                             }
+                            IPCMessage::SearchHistory { keyword } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::SearchHistory { keyword, sender: tx }).await;
+                                if let Some(history) = rx.recv().await {
+                                    IPCResponse::Timeline(history)
+                                } else {
+                                    IPCResponse::Error("Failed to search history".into())
+                                }
+                            }
+                            IPCMessage::SyncBackup => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::SyncBackup { sender: tx }).await;
+                                if let Some(_) = rx.recv().await {
+                                    IPCResponse::Ok
+                                } else {
+                                    IPCResponse::Error("Sync failed".into())
+                                }
+                            }
                             IPCMessage::Shutdown => {
                                 let _ = crate::os::ipc::send_response(&mut stream, &IPCResponse::Ok).await;
                                 std::process::exit(0);
@@ -514,6 +532,24 @@ info!("Static-Memory Daemon started.");
                                     IPCResponse::Error("Failed to get timeline".into())
                                 }
                             }
+                            IPCMessage::SearchHistory { keyword } => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::SearchHistory { keyword, sender: tx }).await;
+                                if let Some(history) = rx.recv().await {
+                                    IPCResponse::Timeline(history)
+                                } else {
+                                    IPCResponse::Error("Failed to search history".into())
+                                }
+                            }
+                            IPCMessage::SyncBackup => {
+                                let (tx, mut rx) = mpsc::channel(1);
+                                let _ = storage.send(crate::storage::StorageCommand::SyncBackup { sender: tx }).await;
+                                if let Some(_) = rx.recv().await {
+                                    IPCResponse::Ok
+                                } else {
+                                    IPCResponse::Error("Sync failed".into())
+                                }
+                            }
                             IPCMessage::Shutdown => {
                                 let _ = crate::os::ipc::send_response(&mut server, &IPCResponse::Ok).await;
                                 std::process::exit(0);
@@ -562,18 +598,45 @@ async fn run_client() -> Result<(), Box<dyn std::error::Error>> {
                 while !model.quit && !connection_lost {
                     if let Ok(events) = model.app.tick(tuirealm::PollStrategy::Once) {
                         for event in events {
-                            if let Some(crate::ui::app::Msg::ExportExecuted(fmt)) = model.update(Some(event)) {
-                                let now = Utc::now();
-                                let start = now - chrono::Duration::days(7);
-                                if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::ExportData { start, end: now, format: fmt }).await {
-                                    connection_lost = true;
-                                    break;
+                            match model.update(Some(event)) {
+                                Some(crate::ui::app::Msg::ExportExecuted(fmt)) => {
+                                    let now = Utc::now();
+                                    let start = now - chrono::Duration::days(7);
+                                    if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::ExportData { start, end: now, format: fmt }).await {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    if let Err(_) = crate::os::ipc::receive_response(&mut stream).await {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
                                 }
-                                if let Err(_) = crate::os::ipc::receive_response(&mut stream).await {
-                                    connection_lost = true;
-                                    break;
+                                Some(crate::ui::app::Msg::SearchExecuted(term)) => {
+                                    if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::SearchHistory { keyword: term }).await {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    match crate::os::ipc::receive_response(&mut stream).await {
+                                        Ok(crate::models::IPCResponse::Timeline(history)) => {
+                                            model.update(Some(crate::ui::app::Msg::UpdateTimeline(history)));
+                                        }
+                                        _ => {}
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
                                 }
-                                model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
+                                Some(crate::ui::app::Msg::SyncBackupExecuted) => {
+                                    if let Err(_) = crate::os::ipc::send_message(&mut stream, &crate::models::IPCMessage::SyncBackup).await {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    if let Err(_) = crate::os::ipc::receive_response(&mut stream).await {
+                                        connection_lost = true;
+                                        break;
+                                    }
+                                    model.update(Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)));
+                                }
+                                _ => {}
                             }
                         }
                     }
