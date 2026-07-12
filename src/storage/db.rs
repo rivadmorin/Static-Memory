@@ -190,7 +190,7 @@ impl Database {
 
                 // Acquire exclusive transaction lock to prevent writes
                 if let Err(e) = self.conn.execute("BEGIN EXCLUSIVE TRANSACTION", []) {
-                    eprintln!("Failed to acquire exclusive lock for rotation: {}", e);
+                    tracing::error!(error = %e, "Failed to acquire exclusive lock for rotation");
                     return false;
                 }
 
@@ -203,7 +203,7 @@ impl Database {
                 })();
 
                 if let Err(e) = backup_res {
-                    eprintln!("Failed to backup database during rotation: {}", e);
+                    tracing::error!(error = %e, "Failed to backup database during rotation");
                     let _ = self.conn.execute("ROLLBACK", []);
                     return false;
                 }
@@ -213,19 +213,19 @@ impl Database {
 
                 // Clear current database state and commit
                 if let Err(e) = self.conn.execute("DELETE FROM activity_log", []) {
-                    eprintln!("Failed to clear database after backup: {}", e);
+                    tracing::error!(error = %e, "Failed to clear database after backup");
                     let _ = self.conn.execute("ROLLBACK", []);
                     return false;
                 }
 
                 if let Err(e) = self.conn.execute("COMMIT", []) {
-                    eprintln!("Failed to commit rotation: {}", e);
+                    tracing::error!(error = %e, "Failed to commit rotation");
                     return false;
                 }
 
                 // Vacuum to reclaim space
                 if let Err(e) = self.conn.execute("VACUUM", []) {
-                    eprintln!("Failed to vacuum database after rotation: {}", e);
+                    tracing::error!(error = %e, "Failed to vacuum database after rotation");
                     // Non-fatal error, backup was successful
                 }
 
@@ -445,7 +445,7 @@ pub fn start_storage_thread(
                     _ = interval.tick() => {
                         if !buffer.is_empty() {
                             if let Err(e) = db.insert_batch(&buffer) {
-                                eprintln!("Database insert_batch error: {}", e);
+                                tracing::error!(error = %e, "Database insert_batch error");
                             }
                             buffer.clear();
                             if db.check_rotation(&config) {
@@ -461,7 +461,7 @@ pub fn start_storage_thread(
                                         buffer.push(entry);
                                         if buffer.len() >= 50 {
                                             if let Err(e) = db.insert_batch(&buffer) {
-                                                eprintln!("Database insert_batch error: {}", e);
+                                                tracing::error!(error = %e, "Database insert_batch error");
                                             }
                                             buffer.clear();
                                             if db.check_rotation(&config) {

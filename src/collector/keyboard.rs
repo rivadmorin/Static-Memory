@@ -39,9 +39,10 @@ pub async fn start_evdev_collector(
                 match Device::open(&path_clone) {
                     Ok(device) => {
                         if let Ok(mut event_stream) = device.into_event_stream() {
-                            println!(
-                                "Listening on device: {}",
-                                event_stream.device().name().unwrap_or("Unknown")
+                            tracing::info!(
+                                device_name = event_stream.device().name().unwrap_or("Unknown"),
+                                device_path = %path_clone,
+                                "Listening on evdev device"
                             );
 
                             loop {
@@ -57,7 +58,11 @@ pub async fn start_evdev_collector(
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("Device error on {}: {}. Attempting re-scan...", path_clone, e);
+                                        tracing::error!(
+                                            device_path = %path_clone,
+                                            error = %e,
+                                            "Device error, attempting re-scan"
+                                        );
                                         break;
                                     }
                                 }
@@ -65,7 +70,11 @@ pub async fn start_evdev_collector(
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to open device {}: {}", path_clone, e);
+                        tracing::error!(
+                            device_path = %path_clone,
+                            error = %e,
+                            "Failed to open evdev device"
+                        );
                     }
                 }
                 
