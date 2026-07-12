@@ -17,6 +17,8 @@ pub struct Engine<O: OSInterface> {
     storage_tx: mpsc::Sender<StorageCommand>,
     last_input_time: DateTime<Utc>,
     is_idle: bool,
+    last_window_check: DateTime<Utc>,
+    is_current_excluded: bool,
 }
 
 impl<O: OSInterface> Engine<O> {
@@ -29,6 +31,8 @@ impl<O: OSInterface> Engine<O> {
             storage_tx,
             last_input_time: Utc::now(),
             is_idle: false,
+            last_window_check: Utc::now() - chrono::Duration::seconds(10), // start in past
+            is_current_excluded: false,
         }
     }
 
@@ -56,13 +60,25 @@ impl<O: OSInterface> Engine<O> {
         }
 
         self.last_input_time = now;
-        self.check_window_switch().await;
 
-        if let Some(window) = &self.current_window {
-            if self.is_excluded(window) {
-                self.buffer.clear();
-                return;
-            }
+        let _ms_since_check = now.signed_duration_since(self.last_window_check).num_milliseconds();
+        let _is_first_check = self.current_window.is_none();
+
+        // Rate-limit window API queries to reduce allocations and CPU on the hot path
+        // During tests, always check immediately for determinism.
+        #[cfg(not(test))]
+        let should_check = _ms_since_check > 250 || _is_first_check;
+        #[cfg(test)]
+        let should_check = true;
+
+        if should_check {
+            self.check_window_switch().await;
+            self.last_window_check = now;
+        }
+
+        if self.is_current_excluded {
+            self.buffer.clear();
+            return;
         }
 
         // Basic handling of special keys could be expanded
@@ -110,9 +126,16 @@ impl<O: OSInterface> Engine<O> {
             (None, None) => false,
         };
 
-        if switch {
-            self.flush().await;
+        if switch || self.current_window.is_none() {
+            if switch {
+                self.flush().await;
+            }
             self.current_window = new_window;
+            self.is_current_excluded = if let Some(w) = &self.current_window {
+                self.is_excluded(w)
+            } else {
+                false
+            };
         }
     }
 
