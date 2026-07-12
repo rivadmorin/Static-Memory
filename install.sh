@@ -26,6 +26,22 @@ fi
 
 # 1. Prasyarat
 info "Memverifikasi hak akses/prasyarat sistem..."
+
+if ! command -v cargo &> /dev/null; then
+    error "Cargo (Rust toolchain) tidak ditemukan. Silakan instal terlebih dahulu: https://rustup.rs/"
+    exit 1
+fi
+
+if ! command -v apt-get &> /dev/null; then
+    error "apt-get tidak ditemukan. Skrip ini membutuhkan sistem berbasis Debian/Ubuntu."
+    exit 1
+fi
+
+if ! command -v systemctl &> /dev/null; then
+    error "systemctl (systemd) tidak ditemukan. Skrip ini membutuhkan sistemd untuk service latar belakang."
+    exit 1
+fi
+
 sudo apt-get update -qq || warn "Gagal menjalankan apt-get update."
 sudo apt-get install -y build-essential libx11-dev libxtst-dev libxi-dev -qq || {
     error "Gagal menginstal dependensi sistem. Pastikan Anda memiliki hak akses sudo."
@@ -53,8 +69,10 @@ mkdir -p "$CONFIG_DIR"
 cleanup_on_failure() {
     warn "Melakukan pembersihan otomatis (rollback)..."
     rm -f "$BIN_DIR/static-memory"
-    systemctl --user stop static-memory.service 2>/dev/null || true
-    systemctl --user disable static-memory.service 2>/dev/null || true
+    if command -v systemctl &> /dev/null; then
+        systemctl --user stop static-memory.service 2>/dev/null || true
+        systemctl --user disable static-memory.service 2>/dev/null || true
+    fi
     rm -f "$HOME/.config/systemd/user/static-memory.service"
     info "Pembersihan selesai."
 }
