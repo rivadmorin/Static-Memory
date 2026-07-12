@@ -95,9 +95,14 @@ Description=Static-Memory Activity Logger
 After=network.target
 
 [Service]
-ExecStart=$BIN_DIR/static-memory
+ExecStart=$BIN_DIR/static-memory --daemon
 WorkingDirectory=$CONFIG_DIR
 Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictRealtime=true
 
 [Install]
 WantedBy=default.target

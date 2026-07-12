@@ -40,6 +40,11 @@ function Cleanup-OnFailure {
     if (Get-ItemProperty -Path $registryPath -Name "StaticMemory" -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $registryPath -Name "StaticMemory"
     }
+    $startupFolder = [Environment]::GetFolderPath("Startup")
+    $shortcutPath = "$startupFolder\StaticMemory.lnk"
+    if (Test-Path $shortcutPath) {
+        Remove-Item $shortcutPath -Force
+    }
     Write-Info "Pembersihan selesai."
 }
 
@@ -79,11 +84,25 @@ exclude_titles = ["Incognito", "Private Browsing", "Banking", "KeePass"]
 Write-Info "Mendaftarkan layanan latar belakang (Registry Run Key)..."
 try {
     $registryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    Set-ItemProperty -Path $registryPath -Name "StaticMemory" -Value "`"$destDir\static-memory.exe`""
+    Set-ItemProperty -Path $registryPath -Name "StaticMemory" -Value "`"$destDir\static-memory.exe`" --daemon"
 } catch {
-    Write-Error "Gagal mendaftarkan Registry Run Key."
-    Cleanup-OnFailure
-    exit 1
+    Write-Warning "Gagal mendaftarkan Registry Run Key. Mencoba membuat shortcut di folder Startup..."
+    try {
+        $startupFolder = [Environment]::GetFolderPath("Startup")
+        $shortcutPath = "$startupFolder\StaticMemory.lnk"
+        $wshShell = New-Object -ComObject WScript.Shell
+        $shortcut = $wshShell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = "$destDir\static-memory.exe"
+        $shortcut.Arguments = "--daemon"
+        $shortcut.WorkingDirectory = "$destDir"
+        $shortcut.WindowStyle = 7 # Minimized
+        $shortcut.Save()
+        Write-Info "Shortcut berhasil dibuat di folder Startup."
+    } catch {
+        Write-Error "Gagal membuat shortcut di folder Startup."
+        Cleanup-OnFailure
+        exit 1
+    }
 }
 
 # 6. PATH Idempotency
