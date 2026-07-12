@@ -398,15 +398,49 @@ impl Database {
                         .unwrap()
                         .as_secs()
                 );
-                if let Err(e) = fs::rename(&config.storage.db_path, &backup_path) {
-                    eprintln!("Failed to rotate database: {}", e);
+
+                // Acquire exclusive transaction lock to prevent writes
+                if let Err(e) = self.conn.execute("BEGIN EXCLUSIVE TRANSACTION", []) {
+                    eprintln!("Failed to acquire exclusive lock for rotation: {}", e);
                     return false;
                 }
-                // Re-open database
-                if let Ok(new_db) = Database::new(&config.storage.db_path) {
-                    *self = new_db;
-                    return true;
+
+                // Perform safe backup using Backup API
+                let backup_res = (|| -> rusqlite::Result<()> {
+                    let mut dest = Connection::open(&backup_path)?;
+                    let backup = rusqlite::backup::Backup::new(&self.conn, &mut dest)?;
+                    backup.step(-1)?;
+                    Ok(())
+                })();
+
+                if let Err(e) = backup_res {
+                    eprintln!("Failed to backup database during rotation: {}", e);
+                    let _ = self.conn.execute("ROLLBACK", []);
+                    return false;
                 }
+
+                // If there are sequence numbers for autoincrement keys, clear them too
+                let _ = self.conn.execute("DELETE FROM sqlite_sequence WHERE name='activity_log'", []);
+
+                // Clear current database state and commit
+                if let Err(e) = self.conn.execute("DELETE FROM activity_log", []) {
+                    eprintln!("Failed to clear database after backup: {}", e);
+                    let _ = self.conn.execute("ROLLBACK", []);
+                    return false;
+                }
+
+                if let Err(e) = self.conn.execute("COMMIT", []) {
+                    eprintln!("Failed to commit rotation: {}", e);
+                    return false;
+                }
+
+                // Vacuum to reclaim space
+                if let Err(e) = self.conn.execute("VACUUM", []) {
+                    eprintln!("Failed to vacuum database after rotation: {}", e);
+                    // Non-fatal error, backup was successful
+                }
+
+                return true;
             }
         }
         false
