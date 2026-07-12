@@ -2,8 +2,6 @@ use crate::os::{OSInterface, WindowInfo};
 #[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ffi::CStr;
 #[cfg(all(target_os = "linux", feature = "x11"))]
-use std::fs;
-#[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ptr;
 #[cfg(all(target_os = "linux", feature = "x11"))]
 use x11_dl::xlib;
@@ -20,7 +18,9 @@ impl OSInterface for LinuxOS {
         unsafe {
             let xlib = xlib::Xlib::open().ok()?;
             let display = (xlib.XOpenDisplay)(ptr::null());
-            if display.is_null() { return None; }
+            if display.is_null() {
+                return None;
+            }
 
             let _root_return = 0;
             let _child_return = 0;
@@ -31,7 +31,8 @@ impl OSInterface for LinuxOS {
             let _mask_return = 0;
 
             let root = (xlib.XDefaultRootWindow)(display);
-            let active_window_atom = (xlib.XInternAtom)(display, "_NET_ACTIVE_WINDOW\0".as_ptr() as *const i8, xlib::False);
+            let active_window_atom =
+                (xlib.XInternAtom)(display, c"_NET_ACTIVE_WINDOW".as_ptr(), xlib::False);
 
             let mut actual_type = 0;
             let mut actual_format = 0;
@@ -40,9 +41,18 @@ impl OSInterface for LinuxOS {
             let mut prop = ptr::null_mut();
 
             (xlib.XGetWindowProperty)(
-                display, root, active_window_atom, 0, 1, xlib::False,
-                xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
-                &mut nitems, &mut bytes_after, &mut prop
+                display,
+                root,
+                active_window_atom,
+                0,
+                1,
+                xlib::False,
+                xlib::AnyPropertyType as u64,
+                &mut actual_type,
+                &mut actual_format,
+                &mut nitems,
+                &mut bytes_after,
+                &mut prop,
             );
 
             if !prop.is_null() {
@@ -50,16 +60,27 @@ impl OSInterface for LinuxOS {
                 (xlib.XFree)(prop as *mut _);
 
                 // Now get title of window_id
-                let name_atom = (xlib.XInternAtom)(display, "_NET_WM_NAME\0".as_ptr() as *const i8, xlib::False);
+                let name_atom = (xlib.XInternAtom)(display, c"_NET_WM_NAME".as_ptr(), xlib::False);
                 let mut title_prop = ptr::null_mut();
                 (xlib.XGetWindowProperty)(
-                    display, window_id, name_atom, 0, 1024, xlib::False,
-                    xlib::AnyPropertyType as u64, &mut actual_type, &mut actual_format,
-                    &mut nitems, &mut bytes_after, &mut title_prop
+                    display,
+                    window_id,
+                    name_atom,
+                    0,
+                    1024,
+                    xlib::False,
+                    xlib::AnyPropertyType as u64,
+                    &mut actual_type,
+                    &mut actual_format,
+                    &mut nitems,
+                    &mut bytes_after,
+                    &mut title_prop,
                 );
 
                 if !title_prop.is_null() {
-                    let title = CStr::from_ptr(title_prop as *const i8).to_string_lossy().into_owned();
+                    let title = CStr::from_ptr(title_prop as *const i8)
+                        .to_string_lossy()
+                        .into_owned();
                     (xlib.XFree)(title_prop as *mut _);
                     (xlib.XCloseDisplay)(display);
                     return Some(WindowInfo {

@@ -1,14 +1,23 @@
 pub mod db;
 
 use crate::models::LogEntry;
-use tokio::sync::mpsc;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 pub enum StorageCommand {
     Store(LogEntry),
-    QueryHistory { sender: mpsc::Sender<Vec<LogEntry>> },
-    GetAnalytics { sender: mpsc::Sender<AnalyticsData> },
-    Export { start: chrono::DateTime<chrono::Utc>, end: chrono::DateTime<chrono::Utc>, format: String, sender: mpsc::Sender<String> },
+    QueryHistory {
+        sender: mpsc::Sender<Vec<LogEntry>>,
+    },
+    GetAnalytics {
+        sender: mpsc::Sender<AnalyticsData>,
+    },
+    Export {
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+        format: String,
+        sender: mpsc::Sender<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

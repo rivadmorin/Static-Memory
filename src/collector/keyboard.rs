@@ -57,7 +57,10 @@ pub async fn start_evdev_collector(
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("Device error on {}: {}. Attempting re-scan...", path_clone, e);
+                                        eprintln!(
+                                            "Device error on {}: {}. Attempting re-scan...",
+                                            path_clone, e
+                                        );
                                         break;
                                     }
                                 }
@@ -68,7 +71,7 @@ pub async fn start_evdev_collector(
                         eprintln!("Failed to open device {}: {}", path_clone, e);
                     }
                 }
-                
+
                 let mut active = active_devices_clone.lock().unwrap();
                 active.remove(&path_clone);
             });

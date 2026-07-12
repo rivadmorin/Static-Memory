@@ -1,11 +1,10 @@
-use tuirealm::{
-    terminal::TerminalBridge,
-    Application,
-    Update,
-    AttrValue, Attribute, props::{PropPayload, PropValue},
-};
-use ratatui::layout::{Layout, Constraint, Direction};
 use crate::ui::Id;
+use ratatui::layout::{Constraint, Direction, Layout};
+use tuirealm::{
+    props::{PropPayload, PropValue},
+    terminal::TerminalBridge,
+    Application, AttrValue, Attribute, Update,
+};
 
 pub struct Model {
     pub app: Application<Id, Msg, Event>,
@@ -65,18 +64,30 @@ impl Update<Msg> for Model {
             }
             Some(Msg::UpdateAnalytics(data)) => {
                 if let Ok(data_str) = serde_json::to_string(&data) {
-                    let _ = self.app.attr(&Id::Dashboard, Attribute::Custom("data"), AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))));
+                    let _ = self.app.attr(
+                        &Id::Dashboard,
+                        Attribute::Custom("data"),
+                        AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))),
+                    );
                 }
                 None
             }
             Some(Msg::UpdateTimeline(data)) => {
                 if let Ok(data_str) = serde_json::to_string(&data) {
-                    let _ = self.app.attr(&Id::Timeline, Attribute::Custom("data"), AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))));
+                    let _ = self.app.attr(
+                        &Id::Timeline,
+                        Attribute::Custom("data"),
+                        AttrValue::Payload(PropPayload::One(PropValue::Str(data_str))),
+                    );
                 }
                 None
             }
             Some(Msg::SetIdle(idle)) => {
-                let _ = self.app.attr(&Id::StatusBar, Attribute::Custom("idle"), AttrValue::Flag(idle));
+                let _ = self.app.attr(
+                    &Id::StatusBar,
+                    Attribute::Custom("idle"),
+                    AttrValue::Flag(idle),
+                );
                 None
             }
             _ => None,

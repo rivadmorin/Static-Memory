@@ -1,6 +1,6 @@
-pub mod windows;
-pub mod linux;
 pub mod ipc;
+pub mod linux;
+pub mod windows;
 
 use smol_str::SmolStr;
 use std::path::PathBuf;

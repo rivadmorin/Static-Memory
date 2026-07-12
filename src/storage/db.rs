@@ -1,13 +1,12 @@
-use rusqlite::{params, Connection};
-use smol_str::SmolStr;
+use crate::models::{Config, LogEntry};
+use crate::storage::{AnalyticsData, StorageCommand};
 use chrono::{DateTime, Utc};
-use crate::models::{LogEntry, Config};
-use crate::storage::{StorageCommand, AnalyticsData};
-use tokio::sync::mpsc;
-use std::thread;
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::Path;
-use std::time::{SystemTime, Duration};
+use std::thread;
+use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
 
 pub struct Database {
     conn: Connection,
@@ -18,7 +17,8 @@ impl Database {
         let conn = Connection::open(path)?;
 
         // Optimizations
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
             PRAGMA cache_size = -2000;
@@ -38,17 +38,23 @@ impl Database {
             [],
         )?;
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON activity_log (timestamp)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log (app_name)", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON activity_log (timestamp)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log (app_name)",
+            [],
+        )?;
 
         Ok(Self { conn })
     }
 
     pub fn insert(&mut self, entry: &LogEntry) -> rusqlite::Result<()> {
         // Sanitize inputs to prevent corruption and handle edge cases
-        let app_name = entry.app_name.as_str().replace('\0', "").replace('\u{FFFD}', "");
-        let window_title = entry.window_title.as_str().replace('\0', "").replace('\u{FFFD}', "");
-        let buffer = entry.buffer.replace('\0', "").replace('\u{FFFD}', "");
+        let app_name = entry.app_name.as_str().replace(['\0', '\u{FFFD}'], "");
+        let window_title = entry.window_title.as_str().replace(['\0', '\u{FFFD}'], "");
+        let buffer = entry.buffer.replace(['\0', '\u{FFFD}'], "");
 
         // Enforce length limits for schema validation
         let app_name = if app_name.len() > 256 {
@@ -107,11 +113,9 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT app_name, COUNT(*) as activity FROM activity_log
              WHERE timestamp > datetime('now', '-1 day')
-             GROUP BY app_name ORDER BY activity DESC LIMIT 5"
+             GROUP BY app_name ORDER BY activity DESC LIMIT 5",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -124,7 +128,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT strftime('%H', timestamp) as hour, COUNT(*) FROM activity_log
              WHERE timestamp > datetime('now', '-1 day')
-             GROUP BY hour"
+             GROUP BY hour",
         )?;
         let rows = stmt.query_map([], |row| {
             let hour_str: String = row.get(0)?;
@@ -144,19 +148,29 @@ impl Database {
     pub fn get_total_words(&self) -> rusqlite::Result<usize> {
         let mut stmt = self.conn.prepare(
             "SELECT SUM(length(buffer) - length(replace(buffer, ' ', '')) + 1) FROM activity_log
-             WHERE timestamp > datetime('now', 'start of day')"
+             WHERE timestamp > datetime('now', 'start of day')",
         )?;
         let total: Option<usize> = stmt.query_row([], |row| row.get(0))?;
         Ok(total.unwrap_or(0))
     }
 
-    pub fn export_data(&self, start: DateTime<Utc>, end: DateTime<Utc>, format: &str) -> rusqlite::Result<String> {
+    pub fn export_data(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        format: &str,
+    ) -> rusqlite::Result<String> {
         let mut stmt = self.conn.prepare(
             "SELECT timestamp, app_name, window_title, buffer FROM activity_log
-             WHERE timestamp BETWEEN ?1 AND ?2 ORDER BY timestamp ASC"
+             WHERE timestamp BETWEEN ?1 AND ?2 ORDER BY timestamp ASC",
         )?;
         let rows = stmt.query_map([start.to_rfc3339(), end.to_rfc3339()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
         })?;
 
         let mut output = String::new();
@@ -164,7 +178,13 @@ impl Database {
             output.push_str("Timestamp,App,Window,Buffer\n");
             for row in rows {
                 let (ts, app, win, buf) = row?;
-                output.push_str(&format!("\"{}\",\"{}\",\"{}\",\"{}\"\n", ts, app, win, buf.replace("\"", "\"\"")));
+                output.push_str(&format!(
+                    "\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                    ts,
+                    app,
+                    win,
+                    buf.replace("\"", "\"\"")
+                ));
             }
         } else {
             for row in rows {
@@ -209,7 +229,9 @@ impl Database {
                 }
 
                 // If there are sequence numbers for autoincrement keys, clear them too
-                let _ = self.conn.execute("DELETE FROM sqlite_sequence WHERE name='activity_log'", []);
+                let _ = self
+                    .conn
+                    .execute("DELETE FROM sqlite_sequence WHERE name='activity_log'", []);
 
                 // Clear current database state and commit
                 if let Err(e) = self.conn.execute("DELETE FROM activity_log", []) {
@@ -331,9 +353,7 @@ impl Database {
         use std::io::{BufWriter, Write};
         let file = std::fs::File::create(path)?;
         let mut writer = BufWriter::new(file);
-        writer.write_all(
-            b"Timestamp,App Name,Window Title,Buffer\n",
-        )?;
+        writer.write_all(b"Timestamp,App Name,Window Title,Buffer\n")?;
         for log_str in log_iter.flatten() {
             writer.write_all(log_str.as_bytes())?;
         }
@@ -399,7 +419,9 @@ impl Database {
 }
 
 pub fn enforce_retention(config: &Config) {
-    let db_dir = Path::new(&config.storage.db_path).parent().unwrap_or(Path::new("."));
+    let db_dir = Path::new(&config.storage.db_path)
+        .parent()
+        .unwrap_or(Path::new("."));
     let retention_days = config.storage.retention_days as u64;
     let cutoff = SystemTime::now() - Duration::from_secs(retention_days * 24 * 3600);
 
@@ -421,16 +443,13 @@ pub fn enforce_retention(config: &Config) {
     }
 }
 
-pub fn start_storage_thread(
-    config: Config,
-    mut rx: mpsc::Receiver<StorageCommand>,
-) {
+pub fn start_storage_thread(config: Config, mut rx: mpsc::Receiver<StorageCommand>) {
     thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("Failed to create storage runtime");
-            
+
         rt.block_on(async move {
             let mut db = Database::new(&config.storage.db_path).expect("Failed to open database");
 
