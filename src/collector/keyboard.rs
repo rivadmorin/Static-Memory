@@ -8,6 +8,13 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+pub async fn start_macos_collector(
+    _engine: std::sync::Arc<tokio::sync::RwLock<crate::engine::Engine<crate::os::macos::MacOS>>>,
+) {
+    // Stub implementation for MacOS keyboard hook
+}
+
 #[cfg(all(target_os = "linux", feature = "evdev_support"))]
 pub async fn start_evdev_collector(
     device_path: Option<String>,

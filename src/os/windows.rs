@@ -4,9 +4,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetMessageW, WH_KEYBOARD_LL, WM_KEYDOWN, KBDLLHOOKSTRUCT
 };
 #[cfg(windows)]
-use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
-#[cfg(windows)]
-use windows_sys::Win32::System::ProcessStatus::GetModuleBaseNameW;
+use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
 #[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 #[cfg(windows)]
@@ -17,16 +15,15 @@ use crate::os::{OSInterface, WindowInfo};
 pub struct WindowsOS;
 
 #[cfg(windows)]
-static mut KEYBOARD_TX: Option<tokio::sync::mpsc::Sender<char>> = None;
+static KEYBOARD_TX: std::sync::OnceLock<tokio::sync::mpsc::Sender<char>> = std::sync::OnceLock::new();
 
 /// SAFETY: This hook is managed via a dedicated background thread on Windows to capture low-level
-/// keyboard events without stalling the main async engine. Use of `static mut` is mitigated
-/// by only initializing once during daemon startup.
+/// keyboard events without stalling the main async engine.
 #[cfg(windows)]
 pub unsafe extern "system" fn keyboard_proc(code: i32, w_param: usize, l_param: isize) -> isize {
     if code >= 0 && w_param == WM_KEYDOWN as usize {
         let kbd = *(l_param as *const KBDLLHOOKSTRUCT);
-        if let Some(tx) = &KEYBOARD_TX {
+        if let Some(tx) = KEYBOARD_TX.get() {
             // Simplified VK code to char conversion
             let c = match kbd.vkCode {
                 0x41..=0x5A => Some((kbd.vkCode as u8) as char), // A-Z
@@ -46,11 +43,13 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, w_param: usize, l_param: 
 
 #[cfg(windows)]
 pub fn start_windows_hook(tx: tokio::sync::mpsc::Sender<char>) {
-    std::thread::spawn(move || unsafe {
-        KEYBOARD_TX = Some(tx);
-        let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), 0, 0);
-        let mut msg = std::mem::zeroed();
-        while GetMessageW(&mut msg, 0, 0, 0) != 0 {}
+    std::thread::spawn(move || {
+        let _ = KEYBOARD_TX.set(tx);
+        unsafe {
+            let _hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), 0, 0);
+            let mut msg = std::mem::zeroed();
+            while GetMessageW(&mut msg, 0, 0, 0) != 0 {}
+        }
     });
 }
 
@@ -70,14 +69,20 @@ impl OSInterface for WindowsOS {
             let mut pid = 0u32;
             GetWindowThreadProcessId(hwnd, &mut pid);
 
-            let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+            let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             let mut process_name = String::from("Unknown");
 
             if process_handle != 0 {
-                let mut name_buf = [0u16; 260];
-                let name_len = GetModuleBaseNameW(process_handle, 0, name_buf.as_mut_ptr(), 260);
-                if name_len > 0 {
-                    process_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+                let mut name_buf = [0u16; 1024];
+                let mut name_len = 1024u32;
+                let success = QueryFullProcessImageNameW(process_handle, 0, name_buf.as_mut_ptr(), &mut name_len);
+                if success != 0 && name_len > 0 {
+                    let full_path = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+                    if let Some(file_name) = std::path::Path::new(&full_path).file_name() {
+                        process_name = file_name.to_string_lossy().into_owned();
+                    } else {
+                        process_name = full_path;
+                    }
                 }
                 CloseHandle(process_handle);
             }
