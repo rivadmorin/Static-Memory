@@ -21,6 +21,8 @@ impl Database {
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
             PRAGMA cache_size = -2000;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA mmap_size = 268435456;
         ",
         )?;
 
@@ -81,6 +83,28 @@ impl Database {
                 buffer
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn insert_batch(&mut self, entries: &[LogEntry]) -> rusqlite::Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO activity_log (timestamp, app_name, window_title, buffer) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for entry in entries {
+                stmt.execute(params![
+                    entry.timestamp.to_rfc3339(),
+                    entry.app_name.as_str(),
+                    entry.window_title.as_str(),
+                    entry.buffer
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -474,87 +498,149 @@ pub fn enforce_retention(config: &Config) {
 
 pub fn start_storage_thread(config: Config, mut rx: mpsc::Receiver<StorageCommand>) {
     thread::spawn(move || {
-        let mut db = Database::new(&config.storage.db_path).expect("Failed to open database");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create storage runtime");
+            
+        rt.block_on(async move {
+            let mut db = Database::new(&config.storage.db_path).expect("Failed to open database");
 
-        // Initial retention check
-        enforce_retention(&config);
+            // Initial retention check
+            enforce_retention(&config);
 
-        while let Some(cmd) = rx.blocking_recv() {
-            match cmd {
-                StorageCommand::Store(entry) => {
-                    if let Err(e) = db.insert(&entry) {
-                        eprintln!("Database insert error: {}", e);
+            let mut buffer: Vec<LogEntry> = Vec::with_capacity(100);
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if !buffer.is_empty() {
+                            if let Err(e) = db.insert_batch(&buffer) {
+                                eprintln!("Database insert_batch error: {}", e);
+                            }
+                            buffer.clear();
+                            if db.check_rotation(&config) {
+                                enforce_retention(&config);
+                            }
+                        }
                     }
-                    if db.check_rotation(&config) {
-                        enforce_retention(&config);
+                    cmd = rx.recv() => {
+                        match cmd {
+                            Some(cmd) => {
+                                match cmd {
+                                    StorageCommand::Store(entry) => {
+                                        buffer.push(entry);
+                                        if buffer.len() >= 50 {
+                                            if let Err(e) = db.insert_batch(&buffer) {
+                                                eprintln!("Database insert_batch error: {}", e);
+                                            }
+                                            buffer.clear();
+                                            if db.check_rotation(&config) {
+                                                enforce_retention(&config);
+                                            }
+                                        }
+                                    }
+                                    StorageCommand::QueryHistory { .. } => {
+                                        // Flush buffer before querying to ensure fresh data
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        // Placeholder for query logic
+                                    }
+                                    StorageCommand::GetAnalytics { sender } => {
+                                        // Flush buffer before querying
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let top_apps = db.get_top_apps().unwrap_or_default();
+                                        let hourly_activity = db.get_hourly_activity().unwrap_or_default();
+                                        let total_words = db.get_total_words().unwrap_or_default();
+                                        let daily_activity_trend = db.get_daily_activity_trend().unwrap_or_default();
+                                        let most_active_window_titles =
+                                            db.get_most_active_window_titles().unwrap_or_default();
+                                        let total_characters = db.get_total_characters().unwrap_or_default();
+                                        let most_productive_hour = db.get_most_productive_hour().unwrap_or_default();
+                                        let average_words_per_entry =
+                                            db.get_average_words_per_entry().unwrap_or_default();
+                                        let longest_active_session =
+                                            db.get_longest_active_session().unwrap_or_default();
+                                        let busiest_day_of_week = db
+                                            .get_busiest_day_of_week()
+                                            .unwrap_or_else(|_| "N/A".to_string());
+                                        let most_used_app_heatmap = db.get_most_used_app_heatmap().unwrap_or_default();
+                                        let recent_apps = db.get_recent_apps().unwrap_or_default();
+                                        let total_entries = db.get_total_entries().unwrap_or_default();
+                                        let _ = sender.send(AnalyticsData {
+                                            top_apps,
+                                            hourly_activity,
+                                            total_words,
+                                            daily_activity_trend,
+                                            most_active_window_titles,
+                                            total_characters,
+                                            most_productive_hour,
+                                            average_words_per_entry,
+                                            longest_active_session,
+                                            busiest_day_of_week,
+                                            most_used_app_heatmap,
+                                            recent_apps,
+                                            total_entries,
+                                        }).await;
+                                    }
+                                    StorageCommand::ExportCsv {
+                                        target_path,
+                                        sender,
+                                    } => {
+                                        // Flush buffer before querying
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let result = match db.export_to_csv(&target_path) {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => Err(e.to_string()),
+                                        };
+                                        let _ = sender.send(result).await;
+                                    }
+                                    StorageCommand::ExportTxt {
+                                        target_path,
+                                        sender,
+                                    } => {
+                                        // Flush buffer before querying
+                                        if !buffer.is_empty() {
+                                            let _ = db.insert_batch(&buffer);
+                                            buffer.clear();
+                                        }
+                                        let result = match db.export_to_txt(&target_path) {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => Err(e.to_string()),
+                                        };
+                                        let _ = sender.send(result).await;
+                                    }
+                                    StorageCommand::PurgeAll { sender } => {
+                                        // Flush buffer (though it will be deleted)
+                                        buffer.clear();
+                                        let result = match db.purge_all_data() {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => Err(e.to_string()),
+                                        };
+                                        let _ = sender.send(result).await;
+                                    }
+                                }
+                            }
+                            None => {
+                                // Channel closed, flush remaining and exit
+                                if !buffer.is_empty() {
+                                    let _ = db.insert_batch(&buffer);
+                                }
+                                break;
+                            }
+                        }
                     }
-                }
-                StorageCommand::QueryHistory { .. } => {
-                    // Placeholder for query logic
-                }
-                StorageCommand::GetAnalytics { sender } => {
-                    let top_apps = db.get_top_apps().unwrap_or_default();
-                    let hourly_activity = db.get_hourly_activity().unwrap_or_default();
-                    let total_words = db.get_total_words().unwrap_or_default();
-                    let daily_activity_trend = db.get_daily_activity_trend().unwrap_or_default();
-                    let most_active_window_titles =
-                        db.get_most_active_window_titles().unwrap_or_default();
-                    let total_characters = db.get_total_characters().unwrap_or_default();
-                    let most_productive_hour = db.get_most_productive_hour().unwrap_or_default();
-                    let average_words_per_entry =
-                        db.get_average_words_per_entry().unwrap_or_default();
-                    let longest_active_session =
-                        db.get_longest_active_session().unwrap_or_default();
-                    let busiest_day_of_week = db
-                        .get_busiest_day_of_week()
-                        .unwrap_or_else(|_| "N/A".to_string());
-                    let most_used_app_heatmap = db.get_most_used_app_heatmap().unwrap_or_default();
-                    let recent_apps = db.get_recent_apps().unwrap_or_default();
-                    let total_entries = db.get_total_entries().unwrap_or_default();
-                    let _ = sender.blocking_send(AnalyticsData {
-                        top_apps,
-                        hourly_activity,
-                        total_words,
-                        daily_activity_trend,
-                        most_active_window_titles,
-                        total_characters,
-                        most_productive_hour,
-                        average_words_per_entry,
-                        longest_active_session,
-                        busiest_day_of_week,
-                        most_used_app_heatmap,
-                        recent_apps,
-                        total_entries,
-                    });
-                }
-                StorageCommand::ExportCsv {
-                    target_path,
-                    sender,
-                } => {
-                    let result = match db.export_to_csv(&target_path) {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e.to_string()),
-                    };
-                    let _ = sender.blocking_send(result);
-                }
-                StorageCommand::ExportTxt {
-                    target_path,
-                    sender,
-                } => {
-                    let result = match db.export_to_txt(&target_path) {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e.to_string()),
-                    };
-                    let _ = sender.blocking_send(result);
-                }
-                StorageCommand::PurgeAll { sender } => {
-                    let result = match db.purge_all_data() {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e.to_string()),
-                    };
-                    let _ = sender.blocking_send(result);
                 }
             }
-        }
+        });
     });
 }
