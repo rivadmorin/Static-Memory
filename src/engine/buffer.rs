@@ -18,6 +18,13 @@ impl TextBuffer {
     }
 
     pub fn push(&mut self, c: char) {
+        // Sanitize input: prevent null bytes, unicode replacement chars, and unsafe control chars
+        if c == '\0' || c == '\u{FFFD}' {
+            return;
+        }
+        if c.is_control() && c != '\n' && c != '\r' && c != '\t' {
+            return;
+        }
         self.buffer.push(c);
     }
 

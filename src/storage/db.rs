@@ -48,13 +48,37 @@ impl Database {
     }
 
     pub fn insert(&mut self, entry: &LogEntry) -> rusqlite::Result<()> {
+        // Sanitize inputs to prevent corruption and handle edge cases
+        let app_name = entry.app_name.as_str().replace('\0', "").replace('\u{FFFD}', "");
+        let window_title = entry.window_title.as_str().replace('\0', "").replace('\u{FFFD}', "");
+        let buffer = entry.buffer.replace('\0', "").replace('\u{FFFD}', "");
+
+        // Enforce length limits for schema validation
+        let app_name = if app_name.len() > 256 {
+            app_name.chars().take(256).collect::<String>()
+        } else {
+            app_name
+        };
+        let window_title = if window_title.len() > 1024 {
+            window_title.chars().take(1024).collect::<String>()
+        } else {
+            window_title
+        };
+        let buffer = if buffer.len() > 8192 {
+            buffer.chars().take(8192).collect::<String>()
+        } else {
+            buffer
+        };
+
+        // We use parameterized queries (?1, ?2, etc.) to safely bind data,
+        // which completely mitigates the risk of SQL injection.
         self.conn.execute(
             "INSERT INTO activity_log (timestamp, app_name, window_title, buffer) VALUES (?1, ?2, ?3, ?4)",
             params![
                 entry.timestamp.to_rfc3339(),
-                entry.app_name.as_str(),
-                entry.window_title.as_str(),
-                entry.buffer
+                app_name,
+                window_title,
+                buffer
             ],
         )?;
         Ok(())
