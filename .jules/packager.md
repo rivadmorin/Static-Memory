@@ -1,0 +1,4 @@
+## 2024-05-24 - Missing Environment Prerequisite Checks
+**Setup/Packaging Obstacle:** The setup script lacked checks for fundamental prerequisites like `cargo`, `apt-get`, and `systemctl` before attempting to install dependencies and build the binary, which could lead to a half-installed or failing state.
+**Root Cause of Quirk:** The script assumes a Debian-based Linux environment with Rust toolchain and systemd pre-installed, but didn't verify this.
+**Automation Logic:** Added explicit checks for `cargo`, `apt-get`, and `systemctl` at the beginning of `install.sh`. If any are missing, the script gracefully exits with an error message instead of failing mid-execution. Similarly, added checks for `systemctl` in `uninstall.sh` and the rollback function to prevent errors on environments without systemd.

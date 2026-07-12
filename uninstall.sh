@@ -23,13 +23,17 @@ read -p "Apakah Anda juga ingin menghapus seluruh file database log lokal (.db d
 delete_data=${delete_data:-N}
 
 info "Menghentikan dan menonaktifkan layanan..."
-systemctl --user stop static-memory.service 2>/dev/null || true
-systemctl --user disable static-memory.service 2>/dev/null || true
+if command -v systemctl &> /dev/null; then
+    systemctl --user stop static-memory.service 2>/dev/null || true
+    systemctl --user disable static-memory.service 2>/dev/null || true
+fi
 
 info "Menghapus biner dan file layanan..."
 rm -f "$HOME/.local/bin/static-memory"
 rm -f "$HOME/.config/systemd/user/static-memory.service"
-systemctl --user daemon-reload
+if command -v systemctl &> /dev/null; then
+    systemctl --user daemon-reload 2>/dev/null || true
+fi
 
 if [[ $delete_data == "y" || $delete_data == "Y" ]]; then
     info "Menghapus direktori data dan konfigurasi..."
@@ -40,5 +44,8 @@ else
     # Clean up only the socket
     rm -f "$HOME/.local/share/static-memory/daemon.sock"
 fi
+
+# Clean up temp files or build caches if run from project dir
+rm -rf "target/release/static-memory" 2>/dev/null || true
 
 success "Uninstalasi selesai."
