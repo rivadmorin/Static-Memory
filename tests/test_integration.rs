@@ -192,3 +192,67 @@ async fn test_ipc_crash_resilience() {
             .await;
     }
 }
+
+use static_memory::os::ipc::{send_message, receive_message, send_response, receive_response};
+use static_memory::models::{IPCMessage, IPCResponse};
+use tokio::io::duplex;
+
+#[tokio::test]
+async fn test_ipc_stream_boundaries() {
+    let (mut client, mut server) = duplex(1024);
+
+    let msg1 = IPCMessage::GetStatus;
+    let msg2 = IPCMessage::GetTimeline { limit: 10 };
+
+    // Client sends two messages quickly (testing stream boundaries)
+    send_message(&mut client, &msg1).await.unwrap();
+    send_message(&mut client, &msg2).await.unwrap();
+
+    // Server reads first
+    let received1 = receive_message(&mut server).await.unwrap();
+    assert_eq!(received1, msg1);
+
+    // Server reads second
+    let received2 = receive_message(&mut server).await.unwrap();
+    assert_eq!(received2, msg2);
+}
+
+#[tokio::test]
+async fn test_ipc_daemon_recovery_on_disconnect() {
+    let (mut client, mut server) = duplex(1024);
+
+    let msg = IPCMessage::GetStatus;
+    send_message(&mut client, &msg).await.unwrap();
+
+    // Drop client
+    drop(client);
+
+    let received = receive_message(&mut server).await.unwrap();
+    assert_eq!(received, msg);
+
+    // Next read should fail because client disconnected
+    let result = receive_message(&mut server).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_ipc_socket_boundaries_large_payload() {
+    // 64 byte buffer to force fragmentation
+    let (mut client, mut server) = duplex(64);
+
+    let large_buffer: String = "A".repeat(1000);
+    let msg = IPCResponse::Error(large_buffer.clone());
+
+    let handle = tokio::spawn(async move {
+        send_response(&mut server, &msg).await.unwrap();
+    });
+
+    let received = receive_response(&mut client).await.unwrap();
+    if let IPCResponse::Error(received_str) = received {
+        assert_eq!(received_str, large_buffer);
+    } else {
+        panic!("Wrong response type");
+    }
+
+    handle.await.unwrap();
+}

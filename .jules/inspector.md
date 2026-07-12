@@ -1,0 +1,4 @@
+## 2024-07-12 - Simulated IPC socket fragmentation with duplex buffers
+**Test Coverage Gap / Flaky Test:** IPC socket boundary tests
+**Gap/Failure Analysis:** When testing IPC streams with large payloads, standard integration tests might not expose fragmentation issues if the local socket buffer handles the entire payload at once, masking potential partial-read bugs in production environments under high load.
+**Test Writing Strategy:** Used `tokio::io::duplex` initialized with an artificially small capacity (64 bytes) to actively force fragmentation of a 1000-byte payload. This reliably replicates socket boundaries and stream chunking without relying on actual OS networking anomalies, ensuring the `receive_response` logic robustly handles incomplete packets until the entire message is reconstructed. Used `tokio::spawn` for the sending task to prevent deadlocks when the payload exceeds the duplex channel's buffer size.
