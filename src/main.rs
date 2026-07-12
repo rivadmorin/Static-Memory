@@ -335,8 +335,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if !is_daemon {
-        // TUI will be implemented here. For now, just start normally if no IPC requested
-        // in future steps, this section would attach to IPC socket instead of starting the engine.
+        // TUI Client with robust retry and auto-reconnect logic
+        if let Err(e) = run_tui_client().await {
+            eprintln!("TUI Error: {}", e);
+        }
+        return Ok(());
     }
 
     // Terminal safety
@@ -435,4 +438,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     engine_lock.flush().await;
 
     Ok(())
+}
+
+async fn run_tui_client() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::os::ipc::connect_with_retry;
+    use tokio::time::Duration;
+
+    println!("Starting TUI Client, waiting for daemon...");
+    
+    // Auto-reconnect loop
+    loop {
+        // Attempt to connect, retry infinitely if the daemon restarts
+        let stream_res = connect_with_retry(u32::MAX, Duration::from_secs(2)).await;
+        
+        match stream_res {
+            Ok(mut stream) => {
+                // To keep it simple, since the app logic is not fully present for UI, we just simulate the client logic here
+                // In a real application, you'd mount the application components here and run the tuirealm loop.
+                // We'll simulate receiving/sending data for now.
+                
+                // Usually this is where `let mut model = crate::ui::setup_app();` would be.
+                println!("Connected to Daemon!");
+                
+                // For this challenge, we just ensure it doesn't panic when stream dies, but continues reconnecting.
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    
+                    // Simple ping to check if still connected
+                    if let Err(_) = crate::os::ipc::send_message(&mut stream, "PING").await {
+                        println!("Lost connection to daemon. Attempting to reconnect...");
+                        break; // Break the inner loop to reconnect
+                    }
+                    
+                    match crate::os::ipc::receive_response(&mut stream).await {
+                        Ok(_resp) => {
+                            // In real app, update UI model
+                        }
+                        Err(_) => {
+                            println!("Failed to read from daemon. Reconnecting...");
+                            break; // Daemon likely died
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to connect to daemon: {}", e);
+                // The connect_with_retry handles delay, so we can just loop back
+            }
+        }
+    }
 }

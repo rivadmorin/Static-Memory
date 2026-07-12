@@ -10,3 +10,4 @@ pub struct WindowInfo {
 pub trait OSInterface {
     fn get_active_window(&self) -> Option<WindowInfo>;
 }
+pub mod ipc;
