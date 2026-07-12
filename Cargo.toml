@@ -36,8 +36,12 @@ chrono = { version = "0.4", features = ["serde"] }
 smallvec = "1.13"
 smol_str = { version = "0.2", features = ["serde"] }
 sysinfo = "0.30"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 
 [target.'cfg(windows)'.dependencies]
+tracing-layer-win-eventlog = "1.0.1"
 windows-sys = { version = "0.52", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
@@ -49,6 +53,7 @@ windows-sys = { version = "0.52", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-dl = "2.21"
 evdev = { version = "0.13", features = ["tokio"] }
+tracing-journald = "0.3.2"
 
 [profile.release]
 opt-level = 'z'     # Optimize for size

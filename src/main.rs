@@ -16,6 +16,54 @@ use std::fs;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
+use tracing::{error, info};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+
+fn setup_logging(is_daemon: bool) -> Option<WorkerGuard> {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    
+    // File appender
+    let file_appender = tracing_appender::rolling::daily(
+        crate::models::get_default_data_dir().join("logs"),
+        "static-memory.log",
+    );
+    let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_writer(non_blocking_file);
+
+    let registry = Registry::default().with(env_filter).with(file_layer);
+
+    #[cfg(target_os = "linux")]
+    {
+        if is_daemon {
+            if let Ok(journald_layer) = tracing_journald::layer() {
+                registry.with(journald_layer).init();
+                return Some(guard);
+            }
+        }
+    }
+    
+    #[cfg(windows)]
+    {
+        if is_daemon {
+             // Use tracing_layer_win_eventlog
+             if let Ok(eventlog_layer) = tracing_layer_win_eventlog::EventLogLayer::new("Static-Memory") {
+                 registry.with(eventlog_layer).init();
+                 return Some(guard);
+             }
+        }
+    }
+
+    if !is_daemon {
+        let stdout_layer = tracing_subscriber::fmt::layer().pretty();
+        registry.with(stdout_layer).init();
+    } else {
+        registry.init();
+    }
+    Some(guard)
+}
 
 fn start_config_watcher(config: Config) {
     std::thread::spawn(move || {
@@ -35,7 +83,7 @@ fn start_config_watcher(config: Config) {
                             if let Ok(new_config_file) = toml::from_str::<ConfigFile>(&content) {
                                 if let Ok(mut privacy) = config.privacy.write() {
                                     *privacy = new_config_file.privacy;
-                                    println!("Config hot-reloaded: Privacy settings updated.");
+                                    info!("Config hot-reloaded: Privacy settings updated.");
                                 }
                             }
                         }
@@ -50,6 +98,7 @@ fn start_config_watcher(config: Config) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let is_daemon = args.iter().any(|arg| arg == "--daemon");
+    let _guard = setup_logging(is_daemon);
     let is_export_csv = args
         .iter()
         .position(|arg| arg == "--export-csv")
@@ -102,12 +151,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => {
                 if let Err(e) = db.export_to_csv(&path) {
-                    eprintln!("Failed to export CSV: {}", e);
+                    error!("Failed to export CSV: {}", e);
                 } else {
-                    println!("Exported to CSV: {}", path);
+                    info!("Exported to CSV: {}", path);
                 }
             }
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -116,12 +165,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => {
                 if let Err(e) = db.export_to_txt(&path) {
-                    eprintln!("Failed to export TXT: {}", e);
+                    error!("Failed to export TXT: {}", e);
                 } else {
-                    println!("Exported to TXT: {}", path);
+                    info!("Exported to TXT: {}", path);
                 }
             }
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -130,12 +179,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(mut db) => {
                 if let Err(e) = db.purge_all_data() {
-                    eprintln!("Failed to purge data: {}", e);
+                    error!("Failed to purge data: {}", e);
                 } else {
-                    println!("Purged all data");
+                    info!("Purged all data");
                 }
             }
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -144,12 +193,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => {
                 if let Err(e) = db.export_to_json(&path) {
-                    eprintln!("Failed to export JSON: {}", e);
+                    error!("Failed to export JSON: {}", e);
                 } else {
-                    println!("Exported to JSON: {}", path);
+                    info!("Exported to JSON: {}", path);
                 }
             }
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -165,9 +214,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 }
-                Err(e) => eprintln!("Search failed: {}", e),
+                Err(e) => error!("Search failed: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -175,10 +224,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(app_name) = is_delete_app {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => match db.delete_app_logs(&app_name) {
-                Ok(count) => println!("Deleted {} logs for app '{}'", count, app_name),
-                Err(e) => eprintln!("Failed to delete app logs: {}", e),
+                Ok(count) => info!("Deleted {} logs for app '{}'", count, app_name),
+                Err(e) => error!("Failed to delete app logs: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -192,9 +241,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("- {}: {}", app, count);
                     }
                 }
-                Err(e) => eprintln!("Failed to get top apps: {}", e),
+                Err(e) => error!("Failed to get top apps: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -203,9 +252,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => match db.get_total_words() {
                 Ok(words) => println!("Total Words Typed: {}", words),
-                Err(e) => eprintln!("Failed to get total words: {}", e),
+                Err(e) => error!("Failed to get total words: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -219,9 +268,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("- {}", app);
                     }
                 }
-                Err(e) => eprintln!("Failed to list apps: {}", e),
+                Err(e) => error!("Failed to list apps: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -230,9 +279,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => match db.get_total_entries() {
                 Ok(count) => println!("Total Log Entries: {}", count),
-                Err(e) => eprintln!("Failed to get entry count: {}", e),
+                Err(e) => error!("Failed to get entry count: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -249,9 +298,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 }
-                Err(e) => eprintln!("Failed to get recent logs: {}", e),
+                Err(e) => error!("Failed to get recent logs: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -260,9 +309,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match crate::storage::db::Database::new(&config.storage.db_path) {
             Ok(db) => match db.get_busiest_day_of_week() {
                 Ok(day) => println!("Busiest Day: {}", day),
-                Err(e) => eprintln!("Failed to get busiest day: {}", e),
+                Err(e) => error!("Failed to get busiest day: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -278,9 +327,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                Err(e) => eprintln!("Failed to get hourly activity: {}", e),
+                Err(e) => error!("Failed to get hourly activity: {}", e),
             },
-            Err(e) => eprintln!("Could not open database: {}", e),
+            Err(e) => error!("Could not open database: {}", e),
         }
         return Ok(());
     }
@@ -293,7 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Terminal safety
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = crossterm::terminal::disable_raw_mode();
-        eprintln!("\n\rApplication crashed: {:?}", panic_info);
+        error!("\n\rApplication crashed: {:?}", panic_info);
     }));
 
     let config = Config::default();
@@ -376,7 +425,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("Static-Memory started. Press Ctrl+C to exit.");
+    info!("Static-Memory started. Press Ctrl+C to exit.");
 
     // This is where collectors would send events to the engine
     // For this boilerplate, we'll just run a simple loop or wait
