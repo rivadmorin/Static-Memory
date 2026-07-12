@@ -7,7 +7,7 @@ use tokio::time::{sleep, Duration};
 type StdError = dyn Error + Send + Sync;
 
 pub fn get_ipc_path() -> PathBuf {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         crate::os::get_data_dir().join("daemon.sock")
     }
@@ -15,14 +15,14 @@ pub fn get_ipc_path() -> PathBuf {
     {
         PathBuf::from(r"\\.\pipe\static-memory")
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         PathBuf::from("daemon.sock")
     }
 }
 
-#[cfg(target_os = "linux")]
-pub mod linux {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod unix_ipc {
     use super::*;
     use tokio::net::{UnixListener, UnixStream};
     use std::os::unix::fs::PermissionsExt;
@@ -64,25 +64,25 @@ pub mod windows {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub type ClientStream = tokio::net::UnixStream;
 
 #[cfg(windows)]
 pub type ClientStream = tokio::net::windows::named_pipe::NamedPipeClient;
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub type ClientStream = tokio::io::Empty;
 
 pub async fn connect_with_retry(max_retries: u32, retry_delay: Duration) -> Result<ClientStream, Box<StdError>> {
     let mut retries = 0;
     loop {
-        #[cfg(target_os = "linux")]
-        let res = linux::connect().await;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let res = unix_ipc::connect().await;
         
         #[cfg(windows)]
         let res = windows::connect().await;
 
-        #[cfg(not(any(target_os = "linux", windows)))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         let res: Result<ClientStream, Box<StdError>> = Err("Unsupported OS".into());
 
         match res {

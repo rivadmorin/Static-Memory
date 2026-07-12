@@ -10,6 +10,8 @@ pub mod ui;
 use crate::os::windows::WindowsOS;
 #[cfg(target_os = "linux")]
 use crate::os::linux::LinuxOS;
+#[cfg(target_os = "macos")]
+use crate::os::macos::MacOS;
 use chrono::Utc;
 use crate::models::{Config, ConfigFile};
 use crate::storage::db::start_storage_thread;
@@ -360,7 +362,9 @@ error!("\n\rDaemon crashed: {:?}", panic_info);
     let os = WindowsOS;
     #[cfg(target_os = "linux")]
     let os = LinuxOS;
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    let os = MacOS;
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     panic!("Unsupported OS");
 
     let engine = Arc::new(tokio::sync::RwLock::new(Engine::new(config.clone(), os, storage_tx.clone())));
@@ -388,6 +392,14 @@ error!("\n\rDaemon crashed: {:?}", panic_info);
         });
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        let engine_clone = Arc::clone(&engine);
+        tokio::spawn(async move {
+            crate::collector::keyboard::start_macos_collector(engine_clone).await;
+        });
+    }
+
     // Idle check loop
     let engine_clone = Arc::clone(&engine);
     tokio::spawn(async move {
@@ -405,9 +417,9 @@ info!("Static-Memory Daemon started.");
     let engine_ipc = Arc::clone(&engine);
     let storage_ipc = storage_tx.clone();
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     tokio::spawn(async move {
-        if let Ok(listener) = crate::os::ipc::linux::listen().await {
+        if let Ok(listener) = crate::os::ipc::unix_ipc::listen().await {
             while let Ok((mut stream, _)) = listener.accept().await {
                 let storage = storage_ipc.clone();
                 let engine_conn = Arc::clone(&engine_ipc);
