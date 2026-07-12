@@ -1,16 +1,18 @@
 #[cfg(windows)]
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextW, SetWindowsHookExW, CallNextHookEx,
-    GetMessageW, WH_KEYBOARD_LL, WM_KEYDOWN, KBDLLHOOKSTRUCT
-};
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+use windows_sys::Win32::Foundation::CloseHandle;
 #[cfg(windows)]
 use windows_sys::Win32::System::ProcessStatus::GetModuleBaseNameW;
 #[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+};
+#[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::CloseHandle;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowTextW, SetWindowsHookExW,
+    KBDLLHOOKSTRUCT, WH_KEYBOARD_LL, WM_KEYDOWN,
+};
 
 use crate::os::{OSInterface, WindowInfo};
 
@@ -31,9 +33,9 @@ pub unsafe extern "system" fn keyboard_proc(code: i32, w_param: usize, l_param: 
             let c = match kbd.vkCode {
                 0x41..=0x5A => Some((kbd.vkCode as u8) as char), // A-Z
                 0x30..=0x39 => Some((kbd.vkCode as u8) as char), // 0-9
-                0x20 => Some(' '), // Space
-                0x0D => Some('\n'), // Enter
-                0x08 => Some('\u{8}'), // Backspace
+                0x20 => Some(' '),                               // Space
+                0x0D => Some('\n'),                              // Enter
+                0x08 => Some('\u{8}'),                           // Backspace
                 _ => None,
             };
             if let Some(ch) = c {
@@ -59,7 +61,9 @@ impl OSInterface for WindowsOS {
     fn get_active_window(&self) -> Option<WindowInfo> {
         unsafe {
             let hwnd = GetForegroundWindow();
-            if hwnd == 0 { return None; }
+            if hwnd == 0 {
+                return None;
+            }
 
             // Get Title
             let mut title_buf = [0u16; 512];

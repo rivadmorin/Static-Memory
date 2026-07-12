@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod buffer_tests {
     use crate::engine::buffer::TextBuffer;
 
     #[test]

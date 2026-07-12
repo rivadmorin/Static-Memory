@@ -1,13 +1,15 @@
-use tuirealm::props::Alignment;
-use tuirealm::tui::layout::{Rect, Layout, Constraint, Direction};
-use tuirealm::tui::widgets::{Block, Borders, Paragraph, Clear};
-use tuirealm::{Component, Event, MockComponent, State};
 use tuirealm::command::{Cmd, CmdResult};
+use tuirealm::props::Alignment;
+use tuirealm::tui::layout::{Constraint, Direction, Layout, Rect};
+use tuirealm::tui::widgets::{Block, Borders, Clear, Paragraph};
+use tuirealm::{Component, Event, MockComponent, State};
 
 pub struct ExportModal;
 
 impl MockComponent for ExportModal {
-    fn perform(&mut self, _cmd: Cmd) -> CmdResult { CmdResult::None }
+    fn perform(&mut self, _cmd: Cmd) -> CmdResult {
+        CmdResult::None
+    }
     fn view(&mut self, frame: &mut tuirealm::Frame, area: Rect) {
         let area = centered_rect(60, 20, area);
         frame.render_widget(Clear, area);
@@ -18,17 +20,25 @@ impl MockComponent for ExportModal {
             area,
         );
     }
-    fn query(&self, _attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> { None }
+    fn query(&self, _attr: tuirealm::Attribute) -> Option<tuirealm::AttrValue> {
+        None
+    }
     fn attr(&mut self, _attr: tuirealm::Attribute, _value: tuirealm::AttrValue) {}
-    fn state(&self) -> State { State::None }
+    fn state(&self) -> State {
+        State::None
+    }
 }
 
 impl Component<crate::ui::app::Msg, crate::ui::app::Event> for ExportModal {
     fn on(&mut self, ev: Event<crate::ui::app::Event>) -> Option<crate::ui::app::Msg> {
         match ev {
             Event::Keyboard(key) => match key.code {
-                tuirealm::event::Key::Esc => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
-                tuirealm::event::Key::Enter => Some(crate::ui::app::Msg::ExportExecuted("csv".into())),
+                tuirealm::event::Key::Esc => {
+                    Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline))
+                }
+                tuirealm::event::Key::Enter => {
+                    Some(crate::ui::app::Msg::ExportExecuted("csv".into()))
+                }
                 _ => None,
             },
             _ => None,

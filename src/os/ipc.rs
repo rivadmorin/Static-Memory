@@ -1,7 +1,7 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::models::{IPCMessage, IPCResponse};
 use std::error::Error;
 use std::path::PathBuf;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration};
 
 type StdError = dyn Error + Send + Sync;
@@ -24,8 +24,8 @@ pub fn get_ipc_path() -> PathBuf {
 #[cfg(target_os = "linux")]
 pub mod linux {
     use super::*;
-    use tokio::net::{UnixListener, UnixStream};
     use std::os::unix::fs::PermissionsExt;
+    use tokio::net::{UnixListener, UnixStream};
 
     pub async fn listen() -> Result<UnixListener, Box<StdError>> {
         let path = get_ipc_path();
@@ -48,7 +48,9 @@ pub mod linux {
 #[cfg(windows)]
 pub mod windows {
     use super::*;
-    use tokio::net::windows::named_pipe::{ServerOptions, ClientOptions, NamedPipeServer, NamedPipeClient};
+    use tokio::net::windows::named_pipe::{
+        ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+    };
 
     pub fn listen() -> Result<NamedPipeServer, Box<StdError>> {
         let path = get_ipc_path();
@@ -73,12 +75,15 @@ pub type ClientStream = tokio::net::windows::named_pipe::NamedPipeClient;
 #[cfg(not(any(target_os = "linux", windows)))]
 pub type ClientStream = tokio::io::Empty;
 
-pub async fn connect_with_retry(max_retries: u32, retry_delay: Duration) -> Result<ClientStream, Box<StdError>> {
+pub async fn connect_with_retry(
+    max_retries: u32,
+    retry_delay: Duration,
+) -> Result<ClientStream, Box<StdError>> {
     let mut retries = 0;
     loop {
         #[cfg(target_os = "linux")]
         let res = linux::connect().await;
-        
+
         #[cfg(windows)]
         let res = windows::connect().await;
 
@@ -99,7 +104,9 @@ pub async fn connect_with_retry(max_retries: u32, retry_delay: Duration) -> Resu
 }
 
 pub async fn send_message<S>(stream: &mut S, msg: &IPCMessage) -> Result<(), Box<StdError>>
-where S: AsyncWriteExt + Unpin {
+where
+    S: AsyncWriteExt + Unpin,
+{
     let payload = serde_json::to_vec(msg)?;
     let len = (payload.len() as u32).to_le_bytes();
     stream.write_all(&len).await?;
@@ -108,7 +115,9 @@ where S: AsyncWriteExt + Unpin {
 }
 
 pub async fn receive_message<S>(stream: &mut S) -> Result<IPCMessage, Box<StdError>>
-where S: AsyncReadExt + Unpin {
+where
+    S: AsyncReadExt + Unpin,
+{
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
@@ -118,7 +127,9 @@ where S: AsyncReadExt + Unpin {
 }
 
 pub async fn send_response<S>(stream: &mut S, resp: &IPCResponse) -> Result<(), Box<StdError>>
-where S: AsyncWriteExt + Unpin {
+where
+    S: AsyncWriteExt + Unpin,
+{
     let payload = serde_json::to_vec(resp)?;
     let len = (payload.len() as u32).to_le_bytes();
     stream.write_all(&len).await?;
@@ -127,7 +138,9 @@ where S: AsyncWriteExt + Unpin {
 }
 
 pub async fn receive_response<S>(stream: &mut S) -> Result<IPCResponse, Box<StdError>>
-where S: AsyncReadExt + Unpin {
+where
+    S: AsyncReadExt + Unpin,
+{
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;

@@ -1,12 +1,18 @@
-use tuirealm::props::{Alignment, Color};
-use tuirealm::tui::layout::{Rect, Layout, Constraint, Direction};
-use tuirealm::tui::widgets::{Block, Borders, Paragraph, BarChart};
-use tuirealm::{Component, Event, MockComponent, State};
-use tuirealm::command::{Cmd, CmdResult};
 use crate::storage::AnalyticsData;
+use tuirealm::command::{Cmd, CmdResult};
+use tuirealm::props::{Alignment, Color};
+use tuirealm::tui::layout::{Constraint, Direction, Layout, Rect};
+use tuirealm::tui::widgets::{BarChart, Block, Borders, Paragraph};
+use tuirealm::{Component, Event, MockComponent, State};
 
 pub struct DashboardComponent {
     pub data: Option<AnalyticsData>,
+}
+
+impl Default for DashboardComponent {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DashboardComponent {
@@ -28,7 +34,8 @@ impl MockComponent for DashboardComponent {
 
         // Top 5 Apps
         let top_apps_content = if let Some(data) = &self.data {
-            data.top_apps.iter()
+            data.top_apps
+                .iter()
                 .map(|(app, count)| format!("{:<20} | {}", app, count))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -37,7 +44,10 @@ impl MockComponent for DashboardComponent {
         };
 
         let top_apps_title = if let Some(data) = &self.data {
-            format!("Top 5 Active Apps (24h) - Total Words Today: {}", data.total_words)
+            format!(
+                "Top 5 Active Apps (24h) - Total Words Today: {}",
+                data.total_words
+            )
         } else {
             "Top 5 Active Apps (24h)".to_string()
         };
@@ -52,14 +62,20 @@ impl MockComponent for DashboardComponent {
         // Hourly Activity Chart
         if let Some(data) = &self.data {
             let labels: Vec<String> = (0..24).map(|h| format!("{:02}", h)).collect();
-            let chart_data: Vec<(&str, u64)> = data.hourly_activity.iter()
+            let chart_data: Vec<(&str, u64)> = data
+                .hourly_activity
+                .iter()
                 .enumerate()
                 .map(|(i, (_h, c))| (labels[i].as_str(), *c as u64))
                 .collect();
 
             frame.render_widget(
                 BarChart::default()
-                    .block(Block::default().borders(Borders::ALL).title("Hourly Activity (24h)"))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Hourly Activity (24h)"),
+                    )
                     .data(&chart_data)
                     .bar_width(3)
                     .bar_gap(1)
@@ -76,7 +92,10 @@ impl MockComponent for DashboardComponent {
 
     fn attr(&mut self, attr: tuirealm::Attribute, value: tuirealm::AttrValue) {
         if let tuirealm::Attribute::Custom("data") = attr {
-            if let tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(tuirealm::props::PropValue::Str(s))) = value {
+            if let tuirealm::AttrValue::Payload(tuirealm::props::PropPayload::One(
+                tuirealm::props::PropValue::Str(s),
+            )) = value
+            {
                 if let Ok(data) = serde_json::from_str::<AnalyticsData>(&s) {
                     self.data = Some(data);
                 }
@@ -94,8 +113,16 @@ impl Component<crate::ui::app::Msg, crate::ui::app::Event> for DashboardComponen
         match ev {
             Event::Keyboard(key_event) => match key_event.code {
                 tuirealm::event::Key::Char('q') => Some(crate::ui::app::Msg::AppClose),
-                tuirealm::event::Key::Tab => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline)),
-                tuirealm::event::Key::Char('e') if key_event.modifiers.contains(tuirealm::event::KeyModifiers::CONTROL) => Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::ExportModal)),
+                tuirealm::event::Key::Tab => {
+                    Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::Timeline))
+                }
+                tuirealm::event::Key::Char('e')
+                    if key_event
+                        .modifiers
+                        .contains(tuirealm::event::KeyModifiers::CONTROL) =>
+                {
+                    Some(crate::ui::app::Msg::SwitchTab(crate::ui::Id::ExportModal))
+                }
                 _ => None,
             },
             _ => None,

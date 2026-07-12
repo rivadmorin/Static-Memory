@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use chrono::{DateTime, Utc};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,9 +14,15 @@ pub struct LogEntry {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum IPCMessage {
     GetStatus,
-    GetTimeline { limit: usize },
+    GetTimeline {
+        limit: usize,
+    },
     GetAnalytics,
-    ExportData { start: DateTime<Utc>, end: DateTime<Utc>, format: String },
+    ExportData {
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        format: String,
+    },
     PurgeData,
     Pause,
     Resume,
@@ -40,7 +46,6 @@ pub struct Config {
     pub privacy: Arc<RwLock<PrivacyConfig>>,
     pub linux: Option<LinuxConfig>,
 }
-
 
 impl Clone for Config {
     fn clone(&self) -> Self {
@@ -91,7 +96,10 @@ impl Default for Config {
         let data_dir = crate::os::get_data_dir();
         Self {
             storage: StorageConfig {
-                db_path: data_dir.join("activity_log.db").to_string_lossy().to_string(),
+                db_path: data_dir
+                    .join("activity_log.db")
+                    .to_string_lossy()
+                    .to_string(),
                 rotation_size_mb: 50,
                 rotation_interval_days: 30,
                 retention_days: 7,
