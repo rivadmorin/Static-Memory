@@ -1,11 +1,11 @@
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 use crate::os::linux::detect_keyboard_device;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 use evdev::Device;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 use std::time::Duration;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 pub async fn start_evdev_collector(
     device_path: Option<String>,
     engine: std::sync::Arc<tokio::sync::RwLock<crate::engine::Engine<crate::os::linux::LinuxOS>>>,
@@ -46,7 +46,7 @@ pub async fn start_evdev_collector(
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 fn event_code_to_char(code: u16) -> Option<char> {
     match code {
         2..=11 => Some((b'0' + ((code + 9) % 10) as u8) as char), // 1-9, 0

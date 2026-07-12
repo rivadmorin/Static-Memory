@@ -5,6 +5,11 @@ edition = "2021"
 authors = ["Jules"]
 description = "Context-Aware Local System & Activity Logger"
 
+[features]
+default = ["x11", "evdev_support"]
+x11 = ["dep:x11-dl"]
+evdev_support = ["dep:evdev"]
+
 [dependencies]
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
@@ -22,8 +27,6 @@ windows-sys = { version = "0.52", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_ProcessStatus"
 ], optional = true }
-x11-dl = { version = "2.21", optional = true }
-evdev = { version = "0.12", optional = true }
 
 # Data & Storage
 rusqlite = { version = "0.31", features = ["bundled", "unlock_notify"] }
@@ -51,8 +54,8 @@ windows-sys = { version = "0.52", features = [
 ]}
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11-dl = "2.21"
-evdev = { version = "0.13", features = ["tokio"] }
+x11-dl = { version = "2.21", optional = true }
+evdev = { version = "0.13", features = ["tokio"], optional = true }
 tracing-journald = "0.3.2"
 
 [profile.release]

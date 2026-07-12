@@ -369,7 +369,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )));
 
     // Start Linux collector if applicable
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "evdev_support"))]
     {
         let engine_clone = Arc::clone(&engine);
         let device_path = config.linux.and_then(|l| l.keyboard_device_path);

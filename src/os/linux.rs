@@ -1,17 +1,17 @@
 use crate::os::{OSInterface, WindowInfo};
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ffi::CStr;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "x11"))]
 use std::fs;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "x11"))]
 use std::ptr;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "x11"))]
 use x11_dl::xlib;
 
 pub struct LinuxOS;
 
 impl OSInterface for LinuxOS {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "x11"))]
     fn get_active_window(&self) -> Option<WindowInfo> {
         unsafe {
             let xlib = match xlib::Xlib::open() {
@@ -127,13 +127,13 @@ impl OSInterface for LinuxOS {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(all(target_os = "linux", feature = "x11")))]
     fn get_active_window(&self) -> Option<WindowInfo> {
         None
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "evdev_support"))]
 pub fn detect_keyboard_device() -> Option<String> {
     use evdev::Device;
     use std::fs;
